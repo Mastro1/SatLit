@@ -135,6 +135,7 @@ def generate_pixel_grid_geojson(roi_geom, crs, transform, max_pixels=1000):
                     "pixel_id": pixel_count + 1,
                     "col": col,
                     "row": row,
+                    "col_row": f"{col}_{row}",
                     "center_lat": round(center.y, 6),
                     "center_lon": round(center.x, 6)
                 }
@@ -149,3 +150,67 @@ def generate_pixel_grid_geojson(roi_geom, crs, transform, max_pixels=1000):
             "crs": crs
         }
     }
+
+
+def latlon_to_grid_cell(lat, lon, crs, transform):
+    """
+    Convert a lat/lon coordinate (WGS84) to (col, row) native grid indices.
+
+    Returns:
+        tuple: (col, row) or None.
+    """
+    if not crs or not transform or len(transform) < 6:
+        return None
+
+    a, b, c, d, e, f = transform
+    
+    # Reproject lat/lon to native CRS if needed
+    is_native_wgs84 = crs.upper() == "EPSG:4326"
+    if is_native_wgs84:
+        native_x, native_y = lon, lat
+    else:
+        try:
+            to_native = Transformer.from_crs("EPSG:4326", crs, always_xy=True)
+            native_x, native_y = to_native.transform(lon, lat)
+        except Exception as err:
+            print(f"Error reprojecting coordinates to native CRS ({crs}): {err}")
+            return None
+
+    # Calculate index indices:
+    # x = a * col + c  =>  col = (x - c) / a
+    # y = e * row + f  =>  row = (y - f) / e
+    col = math.floor((native_x - c) / a)
+    row = math.floor((native_y - f) / e)
+    
+    return col, row
+
+
+def grid_cell_to_center(col, row, crs, transform):
+    """
+    Convert (col, row) native grid cell indices to center coordinates in WGS84 lat/lon.
+
+    Returns:
+        tuple: (lat, lon) or None.
+    """
+    if not crs or not transform or len(transform) < 6:
+        return None
+
+    a, b, c, d, e, f = transform
+    
+    # Calculate native cell center coordinate
+    center_native_x = (col + 0.5) * a + c
+    center_native_y = (row + 0.5) * e + f
+    
+    # Convert back to WGS84 if needed
+    is_native_wgs84 = crs.upper() == "EPSG:4326"
+    if is_native_wgs84:
+        lon, lat = center_native_x, center_native_y
+    else:
+        try:
+            to_wgs84 = Transformer.from_crs(crs, "EPSG:4326", always_xy=True)
+            lon, lat = to_wgs84.transform(center_native_x, center_native_y)
+        except Exception as err:
+            print(f"Error reprojecting cell center to WGS84: {err}")
+            return None
+            
+    return round(lat, 6), round(lon, 6)

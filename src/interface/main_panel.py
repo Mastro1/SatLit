@@ -189,6 +189,9 @@ def render(settings_service: SettingsService):
     # Initialize session state for points if not exists
     if 'selected_points' not in st.session_state:
         st.session_state.selected_points = []
+        
+    if 'selected_grid_pixels' not in st.session_state:
+        st.session_state.selected_grid_pixels = {}
     
     # Section 1: Data Source (WHAT)
     render_data_source_section(satellites, loaded_settings)
@@ -358,13 +361,66 @@ def add_pixel_grid_to_map(m, roi_geom):
                     st.toast(props.get("message"), icon="⚠️")
                 else:
                     from src.interface.map_utils import GRID_STYLE
+                    # Pass the list of selected pixels to highlight them
+                    selected_pixels = set(st.session_state.selected_grid_pixels.keys())
                     add_geojson_overlay(
                         m, grid_geojson,
                         style=GRID_STYLE,
                         tooltip_fields=["pixel_id", "center_lat", "center_lon"],
                         tooltip_aliases=["Pixel ID:", "Lat Center:", "Lon Center:"],
-                        min_zoom=8
+                        min_zoom=8,
+                        selected_pixels=selected_pixels
                     )
+
+
+def render_roi_map(m, key, fit_bounds, roi_geom):
+    """Render the map (interactive or display-only) and handle click events for grid selection."""
+    show_grid = st.session_state.get('show_pixel_grid') and active_satellite_supports_grid()
+    
+    if show_grid:
+        # Render interactive map to receive clicks
+        map_data = render_map(m, key=key, fit_bounds=fit_bounds)
+        
+        # Handle click event on the grid
+        if map_data and map_data.get('last_clicked'):
+            clicked = map_data['last_clicked']
+            lat, lon = clicked['lat'], clicked['lng']
+            
+            selected_satellite = st.session_state.get('selected_satellite')
+            crs = selected_satellite.get('crs')
+            transform = selected_satellite.get('transform')
+            
+            from src.infrastructure.utils.grid_utils import latlon_to_grid_cell, grid_cell_to_center
+            
+            grid_cell = latlon_to_grid_cell(lat, lon, crs, transform)
+            if grid_cell:
+                col, row = grid_cell
+                col_row_key = f"{col}_{row}"
+                
+                # Check if this cell center intersects the ROI (to prevent clicking outside)
+                center_coords = grid_cell_to_center(col, row, crs, transform)
+                if center_coords:
+                    center_lat, center_lon = center_coords
+                    from shapely.geometry import Point
+                    center_pt = Point(center_lon, center_lat)
+                    
+                    if roi_geom and roi_geom.intersects(center_pt):
+                        if col_row_key in st.session_state.selected_grid_pixels:
+                            # Deselect
+                            del st.session_state.selected_grid_pixels[col_row_key]
+                        else:
+                            # Select
+                            st.session_state.selected_grid_pixels[col_row_key] = {
+                                'lat': center_lat,
+                                'lon': center_lon,
+                                'col': col,
+                                'row': row
+                            }
+                        st.rerun()
+    else:
+        # Render in display-only mode
+        render_map_display(m, key=key, fit_bounds=fit_bounds)
+
 
 
 def render_roi_section(loaded_settings: dict):
@@ -658,18 +714,47 @@ def render_shapefile_input():
         
         if st.session_state.get('import_preview_ready'):
             st.markdown("**Import Preview:**")
-            if active_satellite_supports_grid():
-                st.checkbox(
-                    "🔍 Show Pixel Grid Overlay (visible when zoomed in)",
-                    value=st.session_state.get('show_pixel_grid', False),
-                    key="show_pixel_grid",
-                    help="Renders the native GEE satellite pixel grid boundaries on the map so you can see the pixel coverage."
-                )
             import_path = st.session_state.get('uploaded_shapefile', '')
             if import_path and os.path.exists(import_path):
                 try:
                     # Load file on-demand just for preview (simplified for rendering speed)
                     gdf = geometry_service.load_file(import_path, simplify_tolerance=0.005)
+                    
+                    if active_satellite_supports_grid():
+                        st.checkbox(
+                            "🔍 Show Pixel Grid Overlay (visible when zoomed in)",
+                            value=st.session_state.get('show_pixel_grid', False),
+                            key="show_pixel_grid",
+                            help="Renders the native GEE satellite pixel grid boundaries on the map so you can see the pixel coverage."
+                        )
+                        if st.session_state.get('show_pixel_grid'):
+                            col1, col2, col3 = st.columns([1, 1, 2])
+                            with col1:
+                                if st.button("➕ Select All Pixels", key="select_all_shapefile_btn", use_container_width=True):
+                                    selected_satellite = st.session_state.get('selected_satellite')
+                                    crs = selected_satellite.get('crs')
+                                    transform = selected_satellite.get('transform')
+                                    from src.infrastructure.utils.grid_utils import generate_pixel_grid_geojson
+                                    grid_geojson = generate_pixel_grid_geojson(gdf.geometry.unary_union, crs, transform)
+                                    if grid_geojson and "features" in grid_geojson:
+                                        for feat in grid_geojson["features"]:
+                                            props = feat["properties"]
+                                            col, row = props["col"], props["row"]
+                                            col_row_key = f"{col}_{row}"
+                                            st.session_state.selected_grid_pixels[col_row_key] = {
+                                                'lat': props["center_lat"],
+                                                'lon': props["center_lon"],
+                                                'col': col,
+                                                'row': row
+                                            }
+                                        st.rerun()
+                            with col2:
+                                if st.button("🗑️ Clear Pixels", key="clear_grid_shapefile_btn", use_container_width=True):
+                                    st.session_state.selected_grid_pixels = {}
+                                    st.rerun()
+                            with col3:
+                                num_selected = len(st.session_state.selected_grid_pixels)
+                                st.markdown(f"<p style='margin-top:6px; font-weight:bold;'>Selected: {num_selected} pixel(s)</p>", unsafe_allow_html=True)
                     
                     centroid = gdf.geometry.unary_union.centroid
                     center = [centroid.y, centroid.x]
@@ -694,7 +779,7 @@ def render_shapefile_input():
                         )
                         add_pixel_grid_to_map(m, gdf.geometry.unary_union)
                     
-                    render_map_display(m, key="import_preview_map", fit_bounds=gdf.total_bounds)
+                    render_roi_map(m, key="import_preview_map", fit_bounds=gdf.total_bounds, roi_geom=gdf.geometry.unary_union)
                 except Exception as map_err:
                     st.warning(f"Map preview unavailable: {str(map_err)[:100]}")
 
@@ -810,6 +895,34 @@ def render_gadm_input():
                         key="show_pixel_grid",
                         help="Renders the native GEE satellite pixel grid boundaries on the map so you can see the pixel coverage."
                     )
+                    if st.session_state.get('show_pixel_grid'):
+                        col1, col2, col3 = st.columns([1, 1, 2])
+                        with col1:
+                            if st.button("➕ Select All Pixels", key="select_all_gadm_btn", use_container_width=True):
+                                selected_satellite = st.session_state.get('selected_satellite')
+                                crs = selected_satellite.get('crs')
+                                transform = selected_satellite.get('transform')
+                                from src.infrastructure.utils.grid_utils import generate_pixel_grid_geojson
+                                grid_geojson = generate_pixel_grid_geojson(gdf.geometry.unary_union, crs, transform)
+                                if grid_geojson and "features" in grid_geojson:
+                                    for feat in grid_geojson["features"]:
+                                        props = feat["properties"]
+                                        col, row = props["col"], props["row"]
+                                        col_row_key = f"{col}_{row}"
+                                        st.session_state.selected_grid_pixels[col_row_key] = {
+                                            'lat': props["center_lat"],
+                                            'lon': props["center_lon"],
+                                            'col': col,
+                                            'row': row
+                                        }
+                                    st.rerun()
+                        with col2:
+                            if st.button("🗑️ Clear Pixels", key="clear_grid_gadm_btn", use_container_width=True):
+                                st.session_state.selected_grid_pixels = {}
+                                st.rerun()
+                        with col3:
+                            num_selected = len(st.session_state.selected_grid_pixels)
+                            st.markdown(f"<p style='margin-top:6px; font-weight:bold;'>Selected: {num_selected} pixel(s)</p>", unsafe_allow_html=True)
                 
                 try:
                     # Get centroid for map center
@@ -847,7 +960,7 @@ def render_gadm_input():
                     add_pixel_grid_to_map(m, gdf.geometry.unary_union)
                     
                     # Render map
-                    render_map_display(m, key="gadm_map", fit_bounds=gdf.total_bounds)
+                    render_roi_map(m, key="gadm_map", fit_bounds=gdf.total_bounds, roi_geom=gdf.geometry.unary_union)
                     
                 except Exception as map_error:
                     st.warning(f"Map preview unavailable: {str(map_error)[:100]}")
@@ -1051,6 +1164,13 @@ def run_extraction(settings_service: SettingsService, export_method: str):
                 st.error("Failed to initialize GEE. Please check authentication.")
                 return
             
+            # If pixel grid is toggled, validate that at least one pixel is selected
+            show_grid = st.session_state.get('show_pixel_grid') and active_satellite_supports_grid()
+            grid_pixels = st.session_state.get('selected_grid_pixels', {})
+            if show_grid and not grid_pixels:
+                st.error("Please select at least one pixel on the map, or disable the pixel grid to extract the entire region.")
+                return
+
             # Build geometry and feature collection
             geometry, features = build_geometry_and_features()
             if geometry is None:
@@ -1161,7 +1281,9 @@ def run_extraction(settings_service: SettingsService, export_method: str):
 
             _spatial_cols = []
             _imported = st.session_state.get('imported_geodata')
-            if selected_points:
+            if show_grid and grid_pixels:
+                _spatial_cols = ['point_id', 'latitude', 'longitude']
+            elif selected_points:
                 _spatial_cols = ['point_id', 'latitude', 'longitude']
             elif _imported and _imported.get('type') == 'points':
                 _spatial_cols = ['point_id', 'latitude', 'longitude']
@@ -1209,17 +1331,21 @@ def run_extraction(settings_service: SettingsService, export_method: str):
                 # Save to history
                 # Save to history
                 history_manager = HistoryManager()
+                geom_source = 'Points' if selected_points else ('Shapefile' if st.session_state.get('uploaded_shapefile') else 'GADM')
+                if show_grid and grid_pixels:
+                    geom_source = 'Pixel Grid'
+                
                 history_entry = {
                     'satellite': selected_satellite['id'],
                     'bands': selected_bands,
                     'reducers': band_selections,
-                    'geometry_source': 'Points' if selected_points else ('Shapefile' if st.session_state.get('uploaded_shapefile') else 'GADM'),
-                    'num_points': len(selected_points) if selected_points else 0,
-                    'selected_points': selected_points,  # Save full points list
-                    'selected_points': selected_points,  # Save full points list
-                    'gadm_selection': {k: v for k, v in st.session_state.get('gadm_selection', {}).items() if k != 'gdf'}, # Save GADM details without GDF
-                    'gadm_regions': st.session_state.get('gadm_regions'), # Save specific regions if any
-                    'uploaded_shapefile': st.session_state.get('uploaded_shapefile'), # Save shapefile path
+                    'geometry_source': geom_source,
+                    'num_points': len(grid_pixels) if (show_grid and grid_pixels) else (len(selected_points) if selected_points else 0),
+                    'selected_grid_pixels': list(grid_pixels.keys()) if (show_grid and grid_pixels) else [],
+                    'selected_points': selected_points,
+                    'gadm_selection': {k: v for k, v in st.session_state.get('gadm_selection', {}).items() if k != 'gdf'},
+                    'gadm_regions': st.session_state.get('gadm_regions'),
+                    'uploaded_shapefile': st.session_state.get('uploaded_shapefile'),
                     'dates': date_config,
                     'export_method': 'Drive',
                     'output_format': 'CSV',
@@ -1286,6 +1412,29 @@ def build_geometry_and_features():
     """Build ee.Geometry and ee.FeatureCollection from session state inputs."""
     geometry_service = GeometryService()
     
+    # Check if pixel grid is active and has selected pixels
+    show_grid = st.session_state.get('show_pixel_grid') and active_satellite_supports_grid()
+    grid_pixels = st.session_state.get('selected_grid_pixels', {})
+    if show_grid and grid_pixels:
+        features = []
+        coords = []
+        for key, p in grid_pixels.items():
+            point = ee.Geometry.Point([p['lon'], p['lat']])
+            feature = ee.Feature(point, {
+                'point_id': f"Pixel ({p['col']}, {p['row']})",
+                'latitude': p['lat'],
+                'longitude': p['lon']
+            })
+            features.append(feature)
+            coords.append([p['lon'], p['lat']])
+        
+        feature_collection = ee.FeatureCollection(features)
+        if len(coords) == 1:
+            geometry = ee.Geometry.Point(coords[0])
+        else:
+            geometry = ee.Geometry.MultiPoint(coords)
+        return geometry, feature_collection
+
     # Check for manual points
     points = st.session_state.get('selected_points', [])
     if points:

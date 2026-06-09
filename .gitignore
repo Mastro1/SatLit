@@ -131,6 +131,7 @@ venv.bak/
 
 # .development folder
 .development
+.scratch/
 
 # mypy
 .mypy_cache/

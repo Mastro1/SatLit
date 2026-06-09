@@ -52,6 +52,14 @@ GRID_STYLE = {
     'fillOpacity': 0.0,
 }
 
+SELECTED_GRID_STYLE = {
+    'fillColor': '#F59E0B',
+    'color': '#EA580C',
+    'weight': 1.5,
+    'fillOpacity': 0.4,
+}
+
+
 
 # --- Builder functions ---
 
@@ -118,7 +126,7 @@ class ZoomVisibilityPlugin(folium.MacroElement):
 def add_geojson_overlay(m, geojson_data, style=None, highlight=None,
                         tooltip_fields=None, tooltip_aliases=None,
                         popup_fields=None, popup_aliases=None,
-                        min_zoom=None):
+                        min_zoom=None, selected_pixels=None):
     """Add a GeoJSON overlay to a Folium map.
 
     Args:
@@ -131,6 +139,7 @@ def add_geojson_overlay(m, geojson_data, style=None, highlight=None,
         popup_fields: List of field names for GeoJsonPopup.
         popup_aliases: List of aliases for GeoJsonPopup.
         min_zoom: Optional integer representing minimum zoom level at which layer is visible.
+        selected_pixels: Optional set of strings representing selected 'col_row' cells.
 
     Returns:
         The folium.GeoJson object added to the map.
@@ -155,11 +164,20 @@ def add_geojson_overlay(m, geojson_data, style=None, highlight=None,
             localize=True,
         )
 
+    # Dynamic styling function to highlight selected pixels in Amber/Orange
+    if selected_pixels is not None:
+        style_func = lambda feature: (
+            SELECTED_GRID_STYLE if feature['properties'].get('col_row') in selected_pixels
+            else style
+        )
+    else:
+        style_func = lambda x: style
+
     geojson_layer = folium.GeoJson(
         geojson_data,
         control=False,
-        style_function=lambda x: style,
-        highlight_function=lambda x: highlight,
+        style_function=style_func,
+        highlight_function=lambda x: highlight if highlight else style_func(x),
         tooltip=tooltip,
         popup=popup,
     )
