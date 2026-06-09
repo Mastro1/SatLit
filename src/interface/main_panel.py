@@ -20,7 +20,7 @@ from src.infrastructure.persistence.HistoryManager import HistoryManager
 from src.interface.map_utils import (
     create_base_map, add_geojson_overlay, add_markers, render_map,
     render_map_display, gdf_to_geojson, extract_gadm_display_columns,
-    fetch_gadm_boundaries,
+    fetch_gadm_boundaries, ROI_STYLE, ROI_HIGHLIGHT,
 )
 from src.infrastructure.utils.maps_url_parser import (
     parse_google_maps_url, is_google_maps_url,
@@ -308,6 +308,65 @@ def render_data_source_section(satellites: list, loaded_settings: dict):
         st.warning("No bands available for this dataset")
 
 
+def active_satellite_supports_grid():
+    """Check if the currently selected satellite has local grid metadata and pixel size >= 1000m."""
+    selected_satellite = st.session_state.get('selected_satellite')
+    if not selected_satellite:
+        return False
+    pixel_size = selected_satellite.get('pixelSize', 0)
+    crs = selected_satellite.get('crs')
+    transform = selected_satellite.get('transform')
+    return pixel_size >= 1000 and crs is not None and transform is not None
+
+
+def get_local_roi_geometry():
+    """Retrieve the local Shapely geometry of the active ROI (for offline grid calculations)."""
+    roi_method = st.session_state.get('roi_method', '')
+    
+    if "📁 File" in roi_method:
+        import_path = st.session_state.get('uploaded_shapefile')
+        if import_path and os.path.exists(import_path):
+            try:
+                from src.application.services.GeometryService import GeometryService
+                gdf = GeometryService().load_file(import_path)
+                return gdf.geometry.unary_union
+            except Exception:
+                pass
+                
+    elif "🗺️ GADM" in roi_method:
+        gadm_selection = st.session_state.get('gadm_selection')
+        if gadm_selection and 'gdf' in gadm_selection:
+            return gadm_selection['gdf'].geometry.unary_union
+            
+    return None
+
+
+def add_pixel_grid_to_map(m, roi_geom):
+    """Calculate and overlay the native pixel grid on a Folium map."""
+    if st.session_state.get('show_pixel_grid') and active_satellite_supports_grid():
+        if roi_geom:
+            selected_satellite = st.session_state.get('selected_satellite')
+            crs = selected_satellite.get('crs')
+            transform = selected_satellite.get('transform')
+            
+            from src.infrastructure.utils.grid_utils import generate_pixel_grid_geojson
+            grid_geojson = generate_pixel_grid_geojson(roi_geom, crs, transform)
+            
+            if grid_geojson:
+                props = grid_geojson.get("properties", {})
+                if props.get("error") == "too_many_pixels":
+                    st.toast(props.get("message"), icon="⚠️")
+                else:
+                    from src.interface.map_utils import GRID_STYLE
+                    add_geojson_overlay(
+                        m, grid_geojson,
+                        style=GRID_STYLE,
+                        tooltip_fields=["pixel_id", "center_lat", "center_lon"],
+                        tooltip_aliases=["Pixel ID:", "Lat Center:", "Lon Center:"],
+                        min_zoom=8
+                    )
+
+
 def render_roi_section(loaded_settings: dict):
     """Section 2: Region of Interest - Geometry selection."""
     st.header("2️⃣ Region of Interest")
@@ -328,7 +387,7 @@ def render_roi_section(loaded_settings: dict):
         render_shapefile_input()
     elif "🗺️ GADM" in roi_method:
         render_gadm_input()
-    
+        
     # Display map for verification
     render_verification_map()
 
@@ -599,6 +658,13 @@ def render_shapefile_input():
         
         if st.session_state.get('import_preview_ready'):
             st.markdown("**Import Preview:**")
+            if active_satellite_supports_grid():
+                st.checkbox(
+                    "🔍 Show Pixel Grid Overlay (visible when zoomed in)",
+                    value=st.session_state.get('show_pixel_grid', False),
+                    key="show_pixel_grid",
+                    help="Renders the native GEE satellite pixel grid boundaries on the map so you can see the pixel coverage."
+                )
             import_path = st.session_state.get('uploaded_shapefile', '')
             if import_path and os.path.exists(import_path):
                 try:
@@ -621,7 +687,12 @@ def render_shapefile_input():
                         add_markers(m, flat_points, color='blue')
                     else:
                         geojson_data = gdf_to_geojson(gdf)
-                        add_geojson_overlay(m, geojson_data)
+                        add_geojson_overlay(
+                            m, geojson_data,
+                            style=ROI_STYLE,
+                            highlight=ROI_HIGHLIGHT
+                        )
+                        add_pixel_grid_to_map(m, gdf.geometry.unary_union)
                     
                     render_map_display(m, key="import_preview_map", fit_bounds=gdf.total_bounds)
                 except Exception as map_err:
@@ -732,6 +803,13 @@ def render_gadm_input():
                 
                 # Display map
                 st.markdown("**Boundary Preview:**")
+                if active_satellite_supports_grid():
+                    st.checkbox(
+                        "🔍 Show Pixel Grid Overlay (visible when zoomed in)",
+                        value=st.session_state.get('show_pixel_grid', False),
+                        key="show_pixel_grid",
+                        help="Renders the native GEE satellite pixel grid boundaries on the map so you can see the pixel coverage."
+                    )
                 
                 try:
                     # Get centroid for map center
@@ -759,10 +837,14 @@ def render_gadm_input():
                     # Add GeoJson layer with interactivity
                     add_geojson_overlay(
                         m, geojson_data,
+                        style=ROI_STYLE,
+                        highlight=ROI_HIGHLIGHT,
                         tooltip_fields=tooltip_fields,
                         tooltip_aliases=tooltip_aliases,
                         popup_fields=popup_fields,
                     )
+                    
+                    add_pixel_grid_to_map(m, gdf.geometry.unary_union)
                     
                     # Render map
                     render_map_display(m, key="gadm_map", fit_bounds=gdf.total_bounds)

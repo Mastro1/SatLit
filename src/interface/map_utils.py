@@ -31,6 +31,27 @@ DEFAULT_HIGHLIGHT = {
     'fillOpacity': 0.6,
 }
 
+ROI_STYLE = {
+    'fillColor': '#C084FC',
+    'color': '#8B5CF6',
+    'weight': 3,
+    'fillOpacity': 0.1,
+}
+
+ROI_HIGHLIGHT = {
+    'fillColor': '#A78BFA',
+    'color': '#A78BFA',
+    'weight': 3,
+    'fillOpacity': 0.25,
+}
+
+GRID_STYLE = {
+    'fillColor': 'rgba(0,0,0,0)',
+    'color': '#E11D48',
+    'weight': 1,
+    'fillOpacity': 0.0,
+}
+
 
 # --- Builder functions ---
 
@@ -60,9 +81,44 @@ def create_base_map(center=None, zoom=5):
     return m
 
 
+class ZoomVisibilityPlugin(folium.MacroElement):
+    """Folium plugin to control visibility of a layer based on the map's zoom level."""
+    def __init__(self, layer_name, min_zoom):
+        super().__init__()
+        self._name = 'ZoomVisibilityPlugin'
+        self._layer_name = layer_name
+        self._min_zoom = min_zoom
+        self._template = Template("""
+        {% macro script(this, kwargs) %}
+        (function() {
+            var map = {{this._parent.get_name()}};
+            var layer = {{this._layer_name}};
+            
+            function checkZoom() {
+                var zoom = map.getZoom();
+                if (zoom < {{this._min_zoom}}) {
+                    if (map.hasLayer(layer)) {
+                        map.removeLayer(layer);
+                    }
+                } else {
+                    if (!map.hasLayer(layer)) {
+                        map.addLayer(layer);
+                    }
+                }
+            }
+            
+            map.on('zoomend', checkZoom);
+            // Run initially
+            checkZoom();
+        })();
+        {% endmacro %}
+        """)
+
+
 def add_geojson_overlay(m, geojson_data, style=None, highlight=None,
                         tooltip_fields=None, tooltip_aliases=None,
-                        popup_fields=None, popup_aliases=None):
+                        popup_fields=None, popup_aliases=None,
+                        min_zoom=None):
     """Add a GeoJSON overlay to a Folium map.
 
     Args:
@@ -74,6 +130,7 @@ def add_geojson_overlay(m, geojson_data, style=None, highlight=None,
         tooltip_aliases: List of aliases for GeoJsonTooltip.
         popup_fields: List of field names for GeoJsonPopup.
         popup_aliases: List of aliases for GeoJsonPopup.
+        min_zoom: Optional integer representing minimum zoom level at which layer is visible.
 
     Returns:
         The folium.GeoJson object added to the map.
@@ -108,7 +165,11 @@ def add_geojson_overlay(m, geojson_data, style=None, highlight=None,
     )
     geojson_layer.add_to(m)
 
+    if min_zoom is not None:
+        ZoomVisibilityPlugin(geojson_layer.get_name(), min_zoom).add_to(m)
+
     return geojson_layer
+
 
 
 def add_markers(m, points, color='red', icon='info-sign', label_format=None):

@@ -8,6 +8,8 @@
       "website": "https://developers.google.com/earth-engine/datasets/catalog/UCSB-CHG_CHIRPS_DAILY",
       "startDate": "1981-01-01",
       "pixelSize": 5566,
+      "crs": "EPSG:4326",
+      "transform": [0.05, 0, -180, 0, -0.05, 50],
       "bands": [
         {
           "name": "precipitation",
@@ -28,6 +30,8 @@
       "isHourly": true,
       "cadence": "30min",
       "pixelSize": 11132,
+      "crs": "EPSG:4326",
+      "transform": [0.1, 0, -180, 0, -0.1, 90],
       "bands": [
         {
           "name": "MWprecipSource",
@@ -95,6 +99,8 @@
       "website": "https://developers.google.com/earth-engine/datasets/catalog/MODIS_061_MOD13Q1",
       "startDate": "2000-02-18",
       "pixelSize": 250,
+      "crs": "SR-ORG:6974",
+      "transform": [231.65635826395825, 0, -20015109.354, 0, -231.65635826395834, 10007554.677003],
       "bands": [
         {
           "name": "NDVI",
@@ -127,6 +133,8 @@
       "website": "https://developers.google.com/earth-engine/datasets/catalog/ECMWF_ERA5_LAND_DAILY_AGGR",
       "startDate": "1950-01-02",
       "pixelSize": 11132,
+      "crs": "EPSG:4326",
+      "transform": [0.1, 0, -180.05, 0, -0.1, 90.05],
       "bands": [
         {
           "name": "dewpoint_temperature_2m",
@@ -889,6 +897,8 @@
       "startDate": "1950-01-01",
       "isHourly": true,
       "pixelSize": 11132,
+      "crs": "EPSG:4326",
+      "transform": [0.1, 0, -180.05, 0, -0.1, 90.05],
       "bands": [
         {
           "name": "dewpoint_temperature_2m",
@@ -1951,6 +1961,8 @@
       "startDate": "1940-01-01",
       "isHourly": true,
       "pixelSize": 27830,
+      "crs": "EPSG:4326",
+      "transform": [0.25, 0, -180, 0, -0.25, 90],
       "bands": [
         {
           "name": "dewpoint_temperature_2m",
