@@ -12,6 +12,55 @@ APP_NAME = "GEE-UI"
 ICON_ICO = PROJECT_ROOT / "assets" / "favicon.ico"
 ICON_PNG = PROJECT_ROOT / "assets" / "favicon.png"
 
+def print_banner():
+    banner_path = PROJECT_ROOT / "assets" / "ASCII_art.txt"
+    if not banner_path.exists():
+        return
+
+    # Enable ANSI escape sequences on Windows if needed
+    if platform.system() == "Windows":
+        try:
+            import ctypes
+            kernel32 = ctypes.windll.kernel32
+            # STD_OUTPUT_HANDLE = -11
+            # 7 = ENABLE_PROCESSED_OUTPUT | ENABLE_WRAP_AT_EOL_OUTPUT | ENABLE_VIRTUAL_TERMINAL_PROCESSING
+            kernel32.SetConsoleMode(kernel32.GetStdHandle(-11), 7)
+        except Exception:
+            try:
+                os.system('')
+            except Exception:
+                pass
+
+    try:
+        lines = banner_path.read_text(encoding="utf-8").splitlines()
+    except Exception:
+        return
+
+    c1 = (255, 50, 50)      # Red
+    c2 = (139, 0, 0)        # Dark Red
+    c3 = (160, 160, 160)    # Grey
+
+    n = len(lines)
+    if n == 0:
+        return
+
+    for i, line in enumerate(lines):
+        if n > 1:
+            if i < n / 2:
+                t = i / (n / 2)
+                r = int(c1[0] + (c2[0] - c1[0]) * t)
+                g = int(c1[1] + (c2[1] - c1[1]) * t)
+                b = int(c1[2] + (c2[2] - c1[2]) * t)
+            else:
+                t = (i - n / 2) / (n - 1 - n / 2) if (n - 1 - n / 2) > 0 else 0
+                r = int(c2[0] + (c3[0] - c2[0]) * t)
+                g = int(c2[1] + (c3[1] - c2[1]) * t)
+                b = int(c2[2] + (c3[2] - c2[2]) * t)
+        else:
+            r, g, b = c1
+
+        print(f"\033[38;2;{r};{g};{b}m{line}\033[0m")
+
 
 def check_python_version():
     if sys.version_info < MIN_PYTHON:
@@ -62,22 +111,12 @@ def get_desktop() -> Path:
 
 
 def ask_create_shortcut() -> bool:
-    """Ask user via GUI popup (falls back to terminal). Returns True if user says yes."""
+    """Ask user via terminal prompt. Returns True if user says yes, default is No."""
     try:
-        import tkinter as tk
-        from tkinter import messagebox
-        root = tk.Tk()
-        root.withdraw()
-        root.attributes("-topmost", True)
-        result = messagebox.askyesno(
-            "GEE-UI Setup",
-            "Create a desktop shortcut for GEE-UI?",
-        )
-        root.destroy()
-        return result
-    except Exception:
-        answer = input("Create a desktop shortcut? [Y/n] ").strip().lower()
-        return answer in ("", "y", "yes")
+        answer = input("Create a desktop shortcut? [y/N] ").strip().lower()
+        return answer in ("y", "yes")
+    except (Exception, KeyboardInterrupt):
+        return False
 
 
 def _do_create_shortcut(shortcut_path: Path, force: bool = False) -> bool:

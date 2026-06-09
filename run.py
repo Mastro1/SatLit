@@ -16,6 +16,14 @@ def main():
     sys.argv = ["streamlit", "run", str(app_path)] + sys.argv[1:]
     
     # Execute streamlit
+    import threading
+    import time
+
+    def print_delayed_message():
+        time.sleep(1.5)
+        print("\nPress Ctrl+C to exit")
+
+    threading.Thread(target=print_delayed_message, daemon=True).start()
     sys.exit(stcli.main())
 
 if __name__ == "__main__":
