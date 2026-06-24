@@ -1,11 +1,29 @@
-1) Local download must work. 
-1.1) User should see the download folder (possibility to select the folder) + give a name to the file anyway
-3) Add possibility to simplify shapes. THis should work for both imported and GADM shapes.
-4) Implement crop map
+# GEE Data Extractor UI — TODO
 
+---
 
-Magari aggiungere differenti tipi di export
-Add possibility to simplify geometry (for speed up)
-Add possibility to bitmask bands
+## 🔴 High Priority
 
+- [x] **Fix local download** — the local download feature must work end-to-end
+  - [x] Allow the user to select the destination folder
+  - [x] Allow the user to specify a custom filename
+
+- [ ] **Shape simplification** — add the ability to simplify geometries to speed up processing
+  - [ ] Must work for both imported shapes and GADM shapes
+
+---
+
+## 🟡 Medium Priority
+
+- [ ] **Implement crop map** — add a crop map layer/tool
+
+- [ ] **Bitmask bands** — add possibility to apply bitmask to bands
+
+---
+
+## 🟢 Nice to Have / Future
+
+- [ ] **Add pixel visibility of the AOI** — Add the possibility to visualize the overlay of the pixels inside the AOI and download pixel per pixel data. 
+
+- [ ] **Create a notification system** — Add a system that notifies the user when the download is complete or if there is an error. -> Already started with [This Repository](https://github.com/Mastro1/GEE-notification-system)
 
