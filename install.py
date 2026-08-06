@@ -226,11 +226,10 @@ def main():
     check_python_version()
     ensure_venv()
     install_dependencies()
-    create_shortcut()
 
     print(f"\nInstallation complete.")
     if not from_runbat:
-        print(f"Run the app: double-click the desktop shortcut, or run  run.bat  (Windows) / python run.py  (any OS with venv active).")
+        print(f"Run the app: run  run.bat  (Windows) / python run.py  (any OS with venv active).")
 
 
 if __name__ == "__main__":

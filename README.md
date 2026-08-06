@@ -75,7 +75,7 @@ This is the easiest path and requires **no prior Python experience**.
 
 1. **Clone or download** the repository.
 2. **Double-click `run.bat`**.
-   - On first run, it launches the installer automatically: creates a Python virtual environment, installs all dependencies, and offers to create a desktop shortcut.
+   - On first run, it launches the installer automatically: creates a Python virtual environment and installs all dependencies.
    - On subsequent runs, it simply activates the environment and launches the app.
 3. **Authenticate with Google Earth Engine** (first time only) — a browser window will open automatically asking you to authorize access.
 
@@ -95,7 +95,7 @@ cd GEE_data_extraction_UI
 ```bash
 python install.py
 ```
-This creates a virtual environment, installs all dependencies, and offers to create a desktop shortcut.
+This creates a virtual environment and installs all dependencies.
 
 **3. Authenticate with Google Earth Engine** (first time only)
 ```bash
