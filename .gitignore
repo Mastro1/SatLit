@@ -150,7 +150,6 @@ cython_debug/
 .streamlit/
 
 # Agent related
-.agent/
 .gemini/
 .sisyphus/
 
