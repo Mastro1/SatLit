@@ -21,7 +21,7 @@ A **no-code Streamlit dashboard** for extracting historical satellite and climat
 
 ![GEE Data Extractor UI Screenshot](assets/screenshot.png)
 
-The **GEE Data Extractor UI** provides a complete end-to-end pipeline for acquiring complex environmental and satellite imagery data directly from Google Earth Engine — no manual coding required. Users can define their region of interest (ROI) visually, configure temporal filters, and submit high-volume extraction jobs to **Google Drive** or **local storage** in just a few clicks.
+The **GEE Data Extractor UI** provides a complete end-to-end pipeline for acquiring environmental and satellite imagery data directly from Google Earth Engine — no manual coding required. Users can define their region of interest (ROI) visually, configure temporal filters, and submit high-volume extraction jobs to **Google Drive** or **local storage** in just a few clicks.
 
 **New in v0.3.0 — Extraction Presets:** save a full extraction layout (dataset, bands, ROI, dates), reload it anytime, and share it with teammates as a portable JSON file or clipboard paste — without exposing credentials or local file paths.
 
@@ -144,7 +144,6 @@ A **preset** is a named extraction layout — satellite, bands, ROI, dates, and 
 4. **Share** — Under **Share**, download a `.json` file or copy from the JSON code block.
 
 **Notes:** Points and GADM share cleanly. Shapefile presets remember that you used a file, but **paths are never shared** — the recipient chooses their own local file under File Import. Shared JSON never includes Google credentials or task IDs.
----
 
 ## 🏗️ Technical Architecture
 
