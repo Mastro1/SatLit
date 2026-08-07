@@ -23,6 +23,8 @@ A **no-code Streamlit dashboard** for extracting historical satellite and climat
 
 The **GEE Data Extractor UI** provides a complete end-to-end pipeline for acquiring complex environmental and satellite imagery data directly from Google Earth Engine — no manual coding required. Users can define their region of interest (ROI) visually, configure temporal filters, and submit high-volume extraction jobs to **Google Drive** or **local storage** in just a few clicks.
 
+**New in v0.3.0 — Extraction Presets:** save a full extraction layout (dataset, bands, ROI, dates), reload it anytime, and share it with teammates as a portable JSON file or clipboard paste — without exposing credentials or local file paths.
+
 This tool is especially useful for:
 - **Agricultural monitoring** (NDVI, EVI crop health analysis)
 - **Climate research** (ERA5-Land temperature, wind, humidity)
@@ -40,6 +42,7 @@ This tool is especially useful for:
   - **File Upload**: Import Shapefiles (`.shp`), GeoJSON, or KML geometries.
   - **Administrative Boundaries**: Country and province-level selection via **GADM** integration (`pygadm`).
 - **Multiple Export Targets**: Export to **Google Drive** for large batch jobs or download results **locally** for quick samples.
+- **Extraction Presets**: Build a personal library of reusable extraction layouts. Open **Presets** in the sidebar to **Load**, **Save**, **Import**, or **Share** a setup. Teammates can exchange presets via JSON download or copy/paste — credentials and local shapefile paths are never included.
 - **Reproducibility & History**: Settings are persisted in `config/settings.toml`; full job history is tracked in `.cache/history.json` for instant parameter reloading. From Settings you can inspect cache size and clear all history or only entries older than a chosen age.
 - **Desktop Shortcut**: Create or recreate the GEE-UI desktop launcher anytime from Settings (in addition to the one-time first-run prompt).
 - **GEE Task Monitor**: Refresh recent Earth Engine tasks in the sidebar, with a direct link to the [GEE Task Manager](https://code.earthengine.google.com/tasks).
@@ -124,13 +127,23 @@ streamlit run src/interface/app.py
 
 ### Step-by-Step Workflow
 
-1. **Configure Settings** — Use the sidebar to set your GEE Project ID, download folders, manage job history cache, and create a desktop shortcut.
+1. **Configure Settings** — Use the sidebar to set your GEE Project ID, download folders, manage job history cache, and create a desktop shortcut. Open **Presets** anytime to save or reload a full extraction layout.
 2. **Define WHAT** — Select your satellite dataset (e.g., ERA5-Land Daily) and the specific bands or variables you need.
 3. **Define WHERE** — Enter point coordinates, paste a Google Maps link, upload a geometry file (Shapefile, GeoJSON, KML), or pick an administrative boundary using the GADM selector.
 4. **Define WHEN** — Set your start/end date range and apply optional seasonal filters (e.g., extract only June–September).
 5. **Verify** — Inspect the auto-rendered map to confirm your ROI is correct.
 6. **Execute** — Click **Save to Drive** for large batch extractions or **Download Locally** for immediate results.
 
+### Extraction Presets (save, reuse, share)
+
+A **preset** is a named extraction layout — satellite, bands, ROI, dates, and export preferences — not a past GEE job. Use presets when you re-run the same setup often, or when you want to hand a ready-made configuration to a teammate.
+
+1. **Load** — Open **Presets**, pick a saved layout under **Load**, then apply it to the form.
+2. **Save** — Store the current form under **Save**.
+3. **Import** — Under **Import**, paste or upload JSON, preview, then **Add & load**.
+4. **Share** — Under **Share**, download a `.json` file or copy from the JSON code block.
+
+**Notes:** Points and GADM share cleanly. Shapefile presets remember that you used a file, but **paths are never shared** — the recipient chooses their own local file under File Import. Shared JSON never includes Google credentials or task IDs.
 ---
 
 ## 🏗️ Technical Architecture
@@ -141,7 +154,7 @@ The application follows a **Local State Architecture** to ensure responsiveness 
 User Input (Streamlit UI)
         │
         ▼
-  State Manager (settings.toml + history.json)
+  State Manager (settings.toml + history.json + presets.json)
         │
         ▼
   GEE Python API Wrapper
@@ -160,7 +173,7 @@ Google     Local
 | Frontend (UI) | Streamlit |
 | GEE Interface | `earthengine-api` (Python) |
 | ROI Handling | `geopandas`, `pygadm` |
-| Persistence | `settings.toml` + `.cache/history.json` |
+| Persistence | `settings.toml` + `.cache/history.json` + `.cache/presets.json` |
 
 ---
 
@@ -169,6 +182,7 @@ Google     Local
 - [ ] **Expand Dataset Catalog** — Integrate Sentinel-2, Landsat-8/9, and additional climate products.
 - [ ] **Spatial Masking** — Support for uploading and applying custom masks (e.g., crop masks, land cover layers) during extraction.
 - [x] **Full Session Restore** — Finalize "Reload Settings" to allow seamless recovery of complete previous work states.
+- [x] **Extraction Presets** — Local preset library with Load / Save / Import / Share (JSON file and clipboard), shipped in v0.3.0.
 - [x] **Auto-Update** — On startup the app checks for a new version on GitHub. If one is available, a banner appears in the sidebar — one click pulls the latest changes and restarts the app in place.
 
 ---

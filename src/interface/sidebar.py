@@ -1,6 +1,6 @@
 """
 Sidebar module for the GEE Data Extractor.
-Contains: Authentication status, Settings popup, Task monitor, History loader.
+Contains: Authentication status, Settings popup, Task monitor, Presets, History loader.
 """
 import sys
 import json
@@ -13,6 +13,15 @@ import streamlit as st
 
 from src.domain.extractors.BaseExtractor import BaseExtractor
 from src.infrastructure.persistence.HistoryManager import HistoryManager
+from src.infrastructure.persistence.PresetManager import PresetManager
+from src.infrastructure.persistence.PresetSerializer import (
+    PresetValidationError,
+    from_share_payload,
+    preview_summary,
+    sanitize_filename,
+    to_share_json,
+)
+from src.interface.main_panel import snapshot_config_from_session
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 USER_PREFS_FILE = PROJECT_ROOT / ".cache" / "user_preferences.json"
@@ -38,14 +47,17 @@ def render(settings_service):
         
         st.divider()
         
-        # 2. Settings Button (opens popup)
+        # 2. Settings + Presets (open as dialogs)
         render_settings_popup(settings_service)
+        render_presets_popup()
         
         st.divider()
         
         # 3. Task Monitor
         render_task_monitor()
-        
+
+        st.divider()
+
         # 4. History
         render_history_loader()
 
@@ -306,26 +318,275 @@ def render_task_monitor():
             st.warning(f"Could not fetch tasks: {str(e)[:50]}")
 
 
+def render_presets_popup():
+    """Presets button that opens the dialog."""
+    if st.button("📌 Presets", use_container_width=True, key="btn_open_presets"):
+        presets_dialog()
+
+
+def _sync_preset_selectbox(names: list, labels: dict) -> None:
+    """Restore selectbox only when its value is missing/invalid (e.g. dialog reopened)."""
+    current = st.session_state.get("preset_dialog_select")
+    if current in names:
+        return
+    remembered_id = st.session_state.get("preset_selected_id")
+    remembered_name = next(
+        (n for n in names if labels[n].get("preset_id") == remembered_id),
+        None,
+    )
+    st.session_state["preset_dialog_select"] = remembered_name or names[0]
+
+
+@st.dialog("📌 Presets")
+def presets_dialog():
+    """Presets popup: load, save, import, and share."""
+    st.caption(
+        "Save layouts you reuse often. Share them with teammates via file or clipboard — "
+        "no credentials or local file paths are included."
+    )
+
+    manager = PresetManager()
+    presets = manager.list_presets()
+    selected = None
+
+    with st.expander("Load", expanded=True):
+        st.caption("Pick a saved preset and apply it to the form.")
+        if presets:
+            labels = {p["name"]: p for p in presets}
+            names = list(labels.keys())
+            _sync_preset_selectbox(names, labels)
+            selected_name = st.selectbox(
+                "My presets",
+                options=names,
+                key="preset_dialog_select",
+                label_visibility="collapsed",
+            )
+            selected = labels[selected_name]
+            st.session_state["preset_selected_id"] = selected.get("preset_id")
+
+            notes = (selected.get("notes") or "").strip()
+            if notes:
+                st.caption(notes)
+
+            confirm_delete = st.checkbox(
+                "Confirm before deleting",
+                key="preset_confirm_delete",
+                help="Required to enable Delete. This cannot be undone.",
+            )
+            c1, c2 = st.columns(2)
+            with c1:
+                if st.button("Load", use_container_width=True, type="primary", key="btn_preset_load"):
+                    st.session_state["preset_selected_id"] = selected.get("preset_id")
+                    st.session_state["loaded_settings"] = dict(selected.get("config") or {})
+                    st.rerun()
+            with c2:
+                if st.button(
+                    "Delete",
+                    use_container_width=True,
+                    disabled=not confirm_delete,
+                    key="btn_preset_delete",
+                ):
+                    deleted_id = selected.get("preset_id")
+                    manager.delete(deleted_id)
+                    if st.session_state.get("preset_selected_id") == deleted_id:
+                        st.session_state.pop("preset_selected_id", None)
+                    st.session_state.pop("preset_dialog_select", None)
+                    st.session_state["preset_confirm_delete"] = False
+                    st.rerun()
+        else:
+            st.caption("No presets yet — open **Save** below to create one from the form.")
+
+    with st.expander("Save", expanded=True):
+        st.caption("Store the current form as a reusable preset.")
+        try:
+            config = snapshot_config_from_session()
+        except Exception as exc:
+            st.error(f"Could not read the current form: {exc}")
+            config = None
+
+        if config and not config.get("satellite"):
+            st.caption("Pick a satellite in the form before saving a preset.")
+        elif config:
+            default_name = PresetManager.suggest_name_from_entry(config)
+            if st.session_state.get("save_current_preset_name_seed") != default_name:
+                st.session_state["save_current_preset_name"] = default_name
+                st.session_state["save_current_preset_name_seed"] = default_name
+            name = st.text_input("Name", key="save_current_preset_name")
+            notes = st.text_area("Notes (optional)", value="", key="save_current_preset_notes", height=68)
+            if config.get("geometry_source") == "Shapefile" or config.get("uploaded_shapefile"):
+                st.caption(
+                    "Shapefile paths stay on this machine. Shared copies will ask teammates to pick their own file."
+                )
+            if st.button("Save as preset", type="primary", use_container_width=True, key="btn_confirm_save_current"):
+                try:
+                    preset = manager.save_from_session_config(config, name=name, notes=notes)
+                    st.session_state["preset_selected_id"] = preset.get("preset_id")
+                    st.session_state.pop("preset_dialog_select", None)
+                    st.success(f'Preset "{preset["name"]}" saved.')
+                    st.rerun()
+                except PresetValidationError as exc:
+                    st.error(str(exc))
+
+    with st.expander("Import", expanded=False):
+        st.caption("Bring in a preset from a teammate (paste or upload JSON).")
+        _render_import_preset(manager)
+
+    with st.expander("Share", expanded=False):
+        st.caption("Export the preset selected under Load.")
+        if selected:
+            payload = to_share_json(selected)
+            preset_id = selected.get("preset_id") or selected.get("name")
+            filename = f"{sanitize_filename(selected.get('name', 'preset'))}.json"
+            st.download_button(
+                "Download JSON",
+                data=payload.encode("utf-8"),
+                file_name=filename,
+                mime="application/json",
+                use_container_width=True,
+                key=f"btn_download_preset_json_{preset_id}",
+            )
+            st.code(payload, language="json")
+        else:
+            st.caption("Select a preset under **Load** first.")
+
+
+def _clear_import_draft():
+    st.session_state.pop("preset_import_raw", None)
+    st.session_state.pop("preset_import_error", None)
+    st.session_state.pop("preset_import_name", None)
+
+
+def _render_import_preset(manager: PresetManager):
+    method = st.radio(
+        "Import method",
+        options=["Paste JSON", "Upload file"],
+        horizontal=True,
+        key="preset_import_method",
+    )
+
+    if method == "Paste JSON":
+        pasted = st.text_area(
+            "Paste preset JSON",
+            height=140,
+            key="preset_paste_text",
+            placeholder='{"schema_version": 1, "type": "gee_extraction_preset", ...}',
+        )
+        if st.button("Import paste", use_container_width=True, key="btn_parse_preset_paste"):
+            text = (pasted or "").strip()
+            if not text:
+                st.session_state["preset_import_error"] = "Paste the full preset JSON first, then click Import paste."
+                st.session_state.pop("preset_import_raw", None)
+            else:
+                st.session_state["preset_import_raw"] = text
+                st.session_state.pop("preset_import_error", None)
+                st.session_state.pop("preset_import_name", None)
+    else:
+        uploaded = st.file_uploader(
+            "Preset file",
+            type=["json"],
+            key="preset_file_uploader",
+        )
+        if st.button("Import file", use_container_width=True, key="btn_parse_preset_file"):
+            if uploaded is None:
+                st.session_state["preset_import_error"] = "Choose a .json file first, then click Import file."
+                st.session_state.pop("preset_import_raw", None)
+            else:
+                st.session_state["preset_import_raw"] = uploaded.getvalue()
+                st.session_state.pop("preset_import_error", None)
+                st.session_state.pop("preset_import_name", None)
+
+    if st.session_state.get("preset_import_error"):
+        st.error(st.session_state["preset_import_error"])
+
+    raw = st.session_state.get("preset_import_raw")
+    if raw is None:
+        return
+
+    try:
+        draft = from_share_payload(raw)
+    except PresetValidationError as exc:
+        st.error(str(exc))
+        if st.button("Clear", key="btn_clear_bad_import"):
+            _clear_import_draft()
+            st.rerun()
+        return
+
+    summary = preview_summary(draft["name"], draft["config"])
+    st.markdown("**Preview**")
+    st.write(
+        f"**{summary['name']}** · `{summary['satellite']}` · "
+        f"{summary['bands_count']} band(s) · {summary['geometry_source']} · {summary['date_range']}"
+    )
+    for warning in draft.get("warnings") or []:
+        st.warning(warning)
+
+    if "preset_import_name" not in st.session_state:
+        st.session_state["preset_import_name"] = manager.unique_name(draft["name"])
+
+    import_name = st.text_input(
+        "Name in My Presets",
+        key="preset_import_name",
+    )
+
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("Add & load", type="primary", use_container_width=True, key="btn_import_add_load"):
+            try:
+                preset = manager.add(
+                    name=import_name,
+                    config=draft["config"],
+                    notes=draft.get("notes") or "",
+                )
+                _clear_import_draft()
+                st.session_state["preset_selected_id"] = preset.get("preset_id")
+                st.session_state.pop("preset_dialog_select", None)
+                st.session_state["loaded_settings"] = dict(preset["config"])
+                st.success(
+                    f'Preset "{preset["name"]}" is ready — check the form and run when you like.'
+                )
+                st.rerun()
+            except PresetValidationError as exc:
+                st.error(str(exc))
+    with c2:
+        if st.button("Add to My Presets", use_container_width=True, key="btn_import_add_only"):
+            try:
+                preset = manager.add(
+                    name=import_name,
+                    config=draft["config"],
+                    notes=draft.get("notes") or "",
+                )
+                _clear_import_draft()
+                st.session_state["preset_selected_id"] = preset.get("preset_id")
+                st.session_state.pop("preset_dialog_select", None)
+                st.success(f'Preset "{preset["name"]}" added to My Presets.')
+                st.rerun()
+            except PresetValidationError as exc:
+                st.error(str(exc))
+
+    if st.button("Load now (don't save)", use_container_width=True, key="btn_import_load_only"):
+        _clear_import_draft()
+        st.session_state["loaded_settings"] = dict(draft["config"])
+        st.rerun()
+
+
 def render_history_loader():
     """Loads previous run configurations."""
     st.subheader("📜 History")
     history_manager = HistoryManager()
     history = history_manager.get_history()
-    
+
     if not history:
         st.caption("No job history available.")
         return
-    
+
     options = {f"{h['timestamp'][:16]} - {h['satellite'][:15]}": h for h in history}
     selected_option = st.selectbox(
         "Load Previous Run",
         options=list(options.keys()),
-        label_visibility="collapsed"
+        label_visibility="collapsed",
     )
-    
-    if st.button("📥 Load Settings", use_container_width=True):
-        selected_run = options[selected_option]
-        st.session_state['loaded_settings'] = selected_run
+    if st.button("📥 Load Settings", use_container_width=True, key="btn_history_load"):
+        st.session_state["loaded_settings"] = options[selected_option]
         st.success("Settings loaded!")
         st.rerun()
 
