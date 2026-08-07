@@ -59,48 +59,134 @@ def update_default_filename():
 
 
 
+def snapshot_config_from_session() -> dict:
+    """Build a portable extraction config from the current form session state."""
+    satellites = load_satellites()
+    sat_name = st.session_state.get("satellite_selector")
+    selected_satellite = next((s for s in satellites if s["name"] == sat_name), None)
+    sat_id = selected_satellite["id"] if selected_satellite else None
+
+    roi_method = st.session_state.get("roi_method", "")
+    if "Point" in str(roi_method):
+        geometry_source = "Points"
+    elif "File" in str(roi_method):
+        geometry_source = "Shapefile"
+    elif "GADM" in str(roi_method):
+        geometry_source = "GADM"
+    else:
+        geometry_source = "Points"
+
+    export_method_ui = st.session_state.get("export_method", "")
+    if "Drive" in str(export_method_ui):
+        export_method = "Drive"
+    elif "Local" in str(export_method_ui) or "Download" in str(export_method_ui):
+        export_method = "Local"
+    else:
+        export_method = "Drive"
+
+    gadm_selection = st.session_state.get("gadm_selection") or {}
+    if isinstance(gadm_selection, dict):
+        gadm_selection = {k: v for k, v in gadm_selection.items() if k != "gdf"}
+    else:
+        gadm_selection = {}
+
+    dates = st.session_state.get("date_config") or {
+        "start_year": st.session_state.get("form_start_year") or st.session_state.get("start_year"),
+        "end_year": st.session_state.get("form_end_year") or st.session_state.get("end_year"),
+        "start_doy": st.session_state.get("form_start_doy") or st.session_state.get("start_doy", 1),
+        "end_doy": st.session_state.get("form_end_doy") or st.session_state.get("end_doy", 365),
+        "use_season": st.session_state.get("use_season_interactive", st.session_state.get("use_season", False)),
+    }
+
+    selected_points = st.session_state.get("selected_points") or []
+    uploaded = st.session_state.get("uploaded_shapefile")
+
+    return {
+        "satellite": sat_id,
+        "bands": st.session_state.get("selected_bands") or st.session_state.get("band_multiselect") or [],
+        "reducers": dict(st.session_state.get("band_selections") or {}),
+        "geometry_source": geometry_source,
+        "num_points": len(selected_points),
+        "selected_points": selected_points,
+        "gadm_selection": gadm_selection,
+        "gadm_regions": st.session_state.get("gadm_regions"),
+        "uploaded_shapefile": uploaded,
+        "dates": dates,
+        "export_method": export_method,
+        "output_format": "CSV",
+        "custom_filename": st.session_state.get("custom_filename"),
+    }
+
+
 def apply_loaded_settings():
-    """Applies settings from history to session state."""
+    """Applies settings from history or a preset to session state."""
     loaded = st.session_state.get('loaded_settings')
     if not loaded:
         return
 
-    # 1. Restore Satellite
-    # We need to map ID (saved) to Name (widget key)
-    if loaded.get('satellite'):
-        sat_id = loaded['satellite']
-        satellites = load_satellites()
-        sat_name = next((s['name'] for s in satellites if s['id'] == sat_id), None)
-        if sat_name:
-            st.session_state.satellite_selector = sat_name
+    satellites = load_satellites()
 
-    # 2. Restore Bands
-    if loaded.get('bands'):
-        st.session_state.band_multiselect = loaded['bands']
+    # 1. Restore Satellite — unknown id blocks apply (presets / stale catalogs)
+    sat_id = loaded.get('satellite')
+    sat_name = None
+    selected_sat = None
+    if sat_id:
+        selected_sat = next((s for s in satellites if s['id'] == sat_id), None)
+        if selected_sat:
+            sat_name = selected_sat['name']
+            st.session_state.satellite_selector = sat_name
+        else:
+            st.error(
+                f'We don\'t recognize satellite "{sat_id}" in this app version. '
+                "Update the catalog or pick another dataset."
+            )
+            st.session_state.loaded_settings = {}
+            return
+
+    # 2. Restore Bands (skip names missing from the current catalog)
+    bands_to_apply = list(loaded.get('bands') or [])
+    if selected_sat and bands_to_apply:
+        available = {b['name'] for b in selected_sat.get('bands', [])}
+        missing = [b for b in bands_to_apply if b not in available]
+        bands_to_apply = [b for b in bands_to_apply if b in available]
+        if missing:
+            st.warning(
+                "Some bands are not in this catalog and were skipped: "
+                + ", ".join(missing)
+            )
+    if bands_to_apply:
+        st.session_state.band_multiselect = bands_to_apply
 
     # 3. Restore Reducers (Band Selections)
-    # Saved as {'band': 'reducer'} in 'reducers' key
     if loaded.get('reducers'):
-        st.session_state.band_selections = loaded['reducers']
-        # Also set the widget keys for each reducer
-        for band, reducer in loaded['reducers'].items():
+        reducers = dict(loaded['reducers'])
+        if bands_to_apply:
+            reducers = {k: v for k, v in reducers.items() if k in bands_to_apply}
+        st.session_state.band_selections = reducers
+        for band, reducer in reducers.items():
             st.session_state[f"reducer_{band}"] = reducer
 
     # 4. Restore ROI (Points, Shapefile, GADM)
     geo_source = loaded.get('geometry_source')
+    shapefile_required = bool(loaded.get('shapefile_required')) or geo_source == 'Shapefile'
     if geo_source == 'Points':
         st.session_state.roi_method = "📍 Point Coordinates"
-    elif geo_source == 'Shapefile':
+    elif geo_source == 'Shapefile' or shapefile_required:
         st.session_state.roi_method = "📁 File Import"
     elif geo_source == 'GADM':
         st.session_state.roi_method = "🗺️ GADM Admin"
 
-    if loaded.get('selected_points'):
-        st.session_state.selected_points = loaded['selected_points']
-    
+    if loaded.get('selected_points') is not None:
+        st.session_state.selected_points = loaded.get('selected_points') or []
+
     shapefile_path = loaded.get('uploaded_shapefile')
-    if shapefile_path:
-        # Always populate the text input widget key so the path is visible in the UI
+    if shapefile_required and not shapefile_path:
+        st.session_state.uploaded_shapefile = None
+        st.session_state.import_file_path = ""
+        st.warning(
+            "This preset uses a shapefile. Paths aren't shared, so please choose your local file under File Import."
+        )
+    elif shapefile_path:
         st.session_state.import_file_path = shapefile_path
         if os.path.exists(shapefile_path):
             st.session_state.uploaded_shapefile = shapefile_path
@@ -108,37 +194,31 @@ def apply_loaded_settings():
         else:
             st.session_state.uploaded_shapefile = None
             st.warning(f"⚠️ File path restored but not found on disk: {shapefile_path}")
-            
+
     if loaded.get('gadm_selection'):
         st.session_state.gadm_selection = loaded['gadm_selection']
         gadm = loaded['gadm_selection']
-        
-        # Set inputs for the UI widgets
+
         st.session_state.gadm_country = gadm.get('name', '')
         st.session_state.gadm_level = gadm.get('admin_level', 0)
-        
-        # Reset loaded state to force user to click "Load" (or we could auto-load if we trust the inputs)
-        # User requested "prepares it for loading", implying they will click load.
-        st.session_state.gadm_country_loaded = None 
+
+        st.session_state.gadm_country_loaded = None
         st.session_state.gadm_level_loaded = None
         st.session_state.gadm_gdf = None
         st.session_state.pop('gadm_map_visible', None)
-        
-        # Restore specific regions if saved
+
         if loaded.get('gadm_regions'):
-             st.session_state.gadm_regions = loaded['gadm_regions']
-        
+            st.session_state.gadm_regions = loaded['gadm_regions']
+
     # 5. Restore Time/Dates
     if loaded.get('dates'):
         dates = loaded['dates']
         st.session_state.date_config = dates
-        # Set form keys
         st.session_state.form_start_year = dates.get('start_year')
         st.session_state.form_end_year = dates.get('end_year')
         st.session_state.form_start_doy = dates.get('start_doy', 1)
         st.session_state.form_end_doy = dates.get('end_doy', 365)
         st.session_state.use_season_interactive = dates.get('use_season', False)
-        # Also set non-form keys that might be used as fallbacks
         st.session_state.start_year = dates.get('start_year')
         st.session_state.end_year = dates.get('end_year')
         st.session_state.start_doy = dates.get('start_doy', 1)
@@ -147,19 +227,15 @@ def apply_loaded_settings():
 
     # 6. Restore Execution Settings
     if loaded.get('export_method'):
-        # Map back to full string if we saved short version, but we saved 'Drive' or 'Local' usually?
-        # main_panel saves 'Drive'. Widget options are ["☁️ Save to Google Drive (Batch)", "💾 Download Locally (Interactive)"]
-        # We need to match the option string.
         saved_method = loaded['export_method']
         if 'Drive' in saved_method:
-             st.session_state.export_method = "☁️ Save to Google Drive (Batch)"
+            st.session_state.export_method = "☁️ Save to Google Drive (Batch)"
         elif 'Local' in saved_method or 'Download' in saved_method:
-             st.session_state.export_method = "💾 Download Locally (Interactive)"
+            st.session_state.export_method = "💾 Download Locally (Interactive)"
 
     if loaded.get('custom_filename'):
         st.session_state.custom_filename = loaded['custom_filename']
 
-    # Clear after applying to prevent re-application
     st.session_state.loaded_settings = {}
     st.toast("✅ Settings restored successfully!")
 
