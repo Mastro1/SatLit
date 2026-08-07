@@ -40,7 +40,9 @@ This tool is especially useful for:
   - **File Upload**: Import Shapefiles (`.shp`), GeoJSON, or KML geometries.
   - **Administrative Boundaries**: Country and province-level selection via **GADM** integration (`pygadm`).
 - **Multiple Export Targets**: Export to **Google Drive** for large batch jobs or download results **locally** for quick samples.
-- **Reproducibility & History**: Settings are persisted in `config/settings.toml`; full job history is tracked in `.cache/history.json` for instant parameter reloading.
+- **Reproducibility & History**: Settings are persisted in `config/settings.toml`; full job history is tracked in `.cache/history.json` for instant parameter reloading. From Settings you can inspect cache size and clear all history or only entries older than a chosen age.
+- **Desktop Shortcut**: Create or recreate the GEE-UI desktop launcher anytime from Settings (in addition to the one-time first-run prompt).
+- **GEE Task Monitor**: Refresh recent Earth Engine tasks in the sidebar, with a direct link to the [GEE Task Manager](https://code.earthengine.google.com/tasks).
 - **Live Map Verification**: Automated geometry and map rendering to visually confirm your ROI before submitting a job.
 - **Auto-Update**: On startup the app checks for a new version on GitHub. If one is available, a banner appears in the sidebar — one click pulls the latest changes and restarts the app in place.
 
@@ -122,7 +124,7 @@ streamlit run src/interface/app.py
 
 ### Step-by-Step Workflow
 
-1. **Configure Settings** — Use the sidebar to set your GEE Project ID and default download folders.
+1. **Configure Settings** — Use the sidebar to set your GEE Project ID, download folders, manage job history cache, and create a desktop shortcut.
 2. **Define WHAT** — Select your satellite dataset (e.g., ERA5-Land Daily) and the specific bands or variables you need.
 3. **Define WHERE** — Enter point coordinates, paste a Google Maps link, upload a geometry file (Shapefile, GeoJSON, KML), or pick an administrative boundary using the GADM selector.
 4. **Define WHEN** — Set your start/end date range and apply optional seasonal filters (e.g., extract only June–September).
