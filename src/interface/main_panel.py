@@ -1032,19 +1032,31 @@ def run_extraction(settings_service: SettingsService, export_method: str):
 
             # Function to extract data for each image
             def extract_values(image):
-                """Extract values at each point/region for an image."""
-                # Add date properties
+                """Extract values at each point/region for an image.
+
+                Uses per-feature reduceRegion instead of reduceRegions.
+
+                Why: ECMWF/ERA5_LAND/HOURLY assets switched longitude origin from
+                -180.05 to -360.05 during 2024-01-11 (stable from 2024-01-12).
+                With the -360.05 grid, Image.reduceRegions / sampleRegions on
+                point geometries can silently return nulls, while
+                Image.reduceRegion still samples correctly. Mapping reduceRegion
+                over features is the standard per-feature equivalent and works
+                for all datasets/geometries we use (not an ERA5-only branch).
+                """
                 date = ee.Date(image.get('system:time_start'))
-                
-                # Reduce regions - extract values at each feature
-                reduced = image.reduceRegions(
-                    collection=features,
-                    reducer=reducer,
-                    scale=selected_satellite.get('pixelSize', 1000)
-                )
-                
-                # Add date info to each feature
-                def add_date(feature):
+                scale = selected_satellite.get('pixelSize', 1000)
+
+                def reduce_feature(feature):
+                    # Keep scale fixed (no bestEffort): bestEffort can silently
+                    # coarsen large polygons and change zonal statistics.
+                    stats = image.reduceRegion(
+                        reducer=reducer,
+                        geometry=feature.geometry(),
+                        scale=scale,
+                        maxPixels=1e13,
+                    )
+
                     props = {
                         'date': date.format('YYYY-MM-dd'),
                         'year': date.get('year'),
@@ -1058,15 +1070,16 @@ def run_extraction(settings_service: SettingsService, export_method: str):
                         # (e.g. 00:00 vs 00:30 for IMERG 30-min) are distinguishable
                         # without duplicating the date column.
                         props['time'] = date.format('HH:mm')
-                    # For a single-band image, GEE's reduceRegions names the output
-                    # after the reducer (e.g. 'mean'), not the band. Rename it so
-                    # the column is always identifiable regardless of reducer choice.
-                    # For multi-band images GEE already uses the band names.
-                    if len(selected_bands) == 1:
-                        props[selected_bands[0]] = feature.get(reducer_name)
+
+                    # reduceRegion keys outputs by band name for simple reducers
+                    # (mean/sum/min/max/median/first), for both single- and
+                    # multi-band images.
+                    for band in selected_bands:
+                        props[band] = stats.get(band)
+
                     return feature.set(props)
-                
-                return reduced.map(add_date)
+
+                return features.map(reduce_feature)
             
             # Map over collection to extract values
             extracted = collection.map(extract_values).flatten()
