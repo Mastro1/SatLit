@@ -888,1057 +888,353 @@
       "website": "https://developers.google.com/earth-engine/datasets/catalog/ECMWF_ERA5_LAND_HOURLY",
       "startDate": "1950-01-01",
       "isHourly": true,
+      "cadence": "1h",
       "pixelSize": 11132,
       "bands": [
         {
           "name": "dewpoint_temperature_2m",
           "units": "K",
-          "min": 0,
-          "max": 0,
-          "description": "Temperature to which the air, at 2 meters above the surface of the Earth, would have to be cooled for saturation to occur. It is a measure of the humidity of the air."
+          "description": "Temperature to which the air, at 2 meters above the surface of the Earth, would have to be cooled for saturation to occur. It is a measure of the humidity of the air. Combined with temperature and pressure, it can be used to calculate the relative humidity. 2m dew point temperature is calculated by interpolating between the lowest model level and the Earth's surface, taking account of the atmospheric conditions."
         },
         {
           "name": "temperature_2m",
           "units": "K",
-          "min": 0,
-          "max": 0,
-          "description": "Temperature of air at 2m above the surface of land, sea or in-land waters."
+          "description": "Temperature of air at 2m above the surface of land, sea or in-land waters. 2m temperature is calculated by interpolating between the lowest model level and the Earth's surface, taking account of the atmospheric conditions."
         },
         {
           "name": "skin_temperature",
           "units": "K",
-          "min": 0,
-          "max": 0,
-          "description": "Temperature of the surface of the Earth. It represents the temperature of the uppermost surface layer, which has no heat capacity and so can respond instantaneously to changes in surface fluxes."
+          "description": "Temperature of the surface of the Earth. The skin temperature is the theoretical temperature that is required to satisfy the surface energy balance. It represents the temperature of the uppermost surface layer, which has no heat capacity and so can respond instantaneously to changes in surface fluxes. Skin temperature is calculated differently over land and sea."
         },
         {
           "name": "soil_temperature_level_1",
           "units": "K",
-          "min": 0,
-          "max": 0,
-          "description": "Temperature of the soil in layer 1 (0 - 7 cm)."
+          "description": "Temperature of the soil in layer 1 (0 - 7 cm) of the ECMWF Integrated Forecasting System. The surface is at 0 cm. Soil temperature is set at the middle of each layer, and heat transfer is calculated at the interfaces between them. It is assumed that there is no heat transfer out of the bottom of the lowest layer."
         },
         {
           "name": "soil_temperature_level_2",
           "units": "K",
-          "min": 0,
-          "max": 0,
-          "description": "Temperature of the soil in layer 2 (7-28 cm)."
+          "description": "Temperature of the soil in layer 2 (7-28 cm) of the ECMWF Integrated Forecasting System."
         },
         {
           "name": "soil_temperature_level_3",
           "units": "K",
-          "min": 0,
-          "max": 0,
-          "description": "Temperature of the soil in layer 3 (28-100 cm)."
+          "description": "Temperature of the soil in layer 3 (28-100 cm) of the ECMWF Integrated Forecasting System."
         },
         {
           "name": "soil_temperature_level_4",
           "units": "K",
-          "min": 0,
-          "max": 0,
-          "description": "Temperature of the soil in layer 4 (100-289 cm)."
+          "description": "Temperature of the soil in layer 4 (100-289 cm) of the ECMWF Integrated Forecasting System."
         },
         {
           "name": "lake_bottom_temperature",
           "units": "K",
-          "min": 0,
-          "max": 0,
-          "description": "Temperature of water at the bottom of inland water bodies (lakes, reservoirs, rivers) and coastal waters."
+          "description": "Temperature of water at the bottom of inland water bodies (lakes, reservoirs, rivers) and coastal waters. ECMWF implemented a lake model in May 2015 to represent the water temperature and lake ice of all the world's major inland water bodies in the Integrated Forecasting System. The model keeps lake depth and surface area (or fractional cover) constant in time."
         },
         {
           "name": "lake_ice_depth",
           "units": "m",
-          "min": 0,
-          "max": 0,
-          "description": "The thickness of ice on inland water bodies (lakes, reservoirs and rivers) and coastal waters."
+          "description": "The thickness of ice on inland water bodies (lakes, reservoirs and rivers) and coastal waters. The ECMWF Integrated Forecasting System (IFS) represents the formation and melting of ice on inland water bodies (lakes, reservoirs and rivers) and coastal water. A single ice layer is represented. This parameter is the thickness of that ice layer."
         },
         {
           "name": "lake_ice_temperature",
           "units": "K",
-          "min": 0,
-          "max": 0,
-          "description": "The temperature of the uppermost surface of ice on inland water bodies (lakes, reservoirs, rivers) and coastal waters."
+          "description": "The temperature of the uppermost surface of ice on inland water bodies (lakes, reservoirs, rivers) and coastal waters. The ECMWF Integrated Forecasting System represents the formation and melting of ice on lakes. A single ice layer is represented."
         },
         {
           "name": "lake_mix_layer_depth",
           "units": "m",
-          "min": 0,
-          "max": 0,
-          "description": "The thickness of the upper most layer of an inland water body that is well mixed and has a near constant temperature with depth."
+          "description": "The thickness of the upper most layer of an inland water body (lake, reservoirs, and rivers) or coastal waters that is well mixed and has a near constant temperature with depth (uniform distribution of temperature). The ECMWF Integrated Forecasting System represents inland water bodies with two layers in the vertical, the mixed layer above and the thermocline below. Thermoclines upper boundary is located at the mixed layer bottom, and the lower boundary at the lake bottom. Mixing within the mixed layer can occur when the density of the surface (and near-surface) water is greater than that of the water below. Mixing can also occur through the action of wind on the surface of the lake."
         },
         {
           "name": "lake_mix_layer_temperature",
           "units": "K",
-          "min": 0,
-          "max": 0,
-          "description": "The temperature of the upper most layer of inland water bodies (lakes, reservoirs and rivers) or coastal waters) that is well mixed."
+          "description": "The temperature of the upper most layer of inland water bodies (lakes, reservoirs and rivers) or coastal waters) that is well mixed. The ECMWF Integrated Forecasting System represents inland water bodies with two layers in the vertical, the mixed layer above and the thermocline below. Thermoclines upper boundary is located at the mixed layer bottom, and the lower boundary at the lake bottom. Mixing within the mixed layer can occur when the density of the surface (and near-surface) water is greater than that of the water below. Mixing can also occur through the action of wind on the surface of the lake."
         },
         {
           "name": "lake_shape_factor",
           "units": "",
-          "min": 0,
-          "max": 0,
-          "description": "Describes the way that temperature changes with depth in the thermocline layer of inland water bodies."
+          "description": "This parameter describes the way that temperature changes with depth in the thermocline layer of inland water bodies (lakes, reservoirs and rivers) and coastal waters. It is used to calculate the lake bottom temperature and other lake-related parameters. The ECMWF Integrated Forecasting System represents inland and coastal water bodies with two layers in the vertical, the mixed layer above and the thermocline below where temperature changes with depth."
         },
         {
           "name": "lake_total_layer_temperature",
           "units": "K",
-          "min": 0,
-          "max": 0,
-          "description": "The mean temperature of total water column in inland water bodies (lakes, reservoirs and rivers) and coastal waters."
+          "description": "The mean temperature of total water column in inland water bodies (lakes, reservoirs and rivers) and coastal waters. The ECMWF Integrated Forecasting System represents inland water bodies with two layers in the vertical, the mixed layer above and the thermocline below where temperature changes with depth. This parameter is the mean over the two layers."
         },
         {
           "name": "snow_albedo",
           "units": "",
-          "min": 0,
-          "max": 0,
-          "description": "Fraction of solar (shortwave) radiation reflected by the snow, for both direct and diffuse radiation. Values vary between 0 and 1."
+          "description": "It is defined as the fraction of solar (shortwave) radiation reflected by the snow, across the solar spectrum, for both direct and diffuse radiation. It is a measure of the reflectivity of the snow covered grid cells. Values vary between 0 and 1. Typically, snow and ice have high reflectivity with albedo values of 0.8 and above."
         },
         {
           "name": "snow_cover",
           "units": "",
-          "min": 0,
-          "max": 0,
-          "description": "Represents the fraction (0-1) of the cell / grid-box occupied by snow."
+          "description": "It represents the fraction (0-1) of the cell / grid-box occupied by snow (similar to the cloud cover fields of ERA5)."
         },
         {
           "name": "snow_density",
           "units": "kg/m^3",
-          "min": 0,
-          "max": 0,
-          "description": "Mass of snow per cubic meter in the snow layer."
+          "description": "Mass of snow per cubic meter in the snow layer. The ECMWF Integrated Forecast System (IFS) model represents snow as a single additional layer over the uppermost soil level. The snow may cover all or part of the grid box."
         },
         {
           "name": "snow_depth",
           "units": "m",
-          "min": 0,
-          "max": 0,
           "description": "Instantaneous grid-box average of the snow thickness on the ground (excluding snow on canopy)."
         },
         {
           "name": "snow_depth_water_equivalent",
           "units": "m of water equivalent",
-          "min": 0,
-          "max": 0,
-          "description": "Depth of snow from the snow-covered area of a grid box, in meters of water equivalent."
+          "description": "Depth of snow from the snow-covered area of a grid box. Its units are meters of water equivalent, so it is the depth the water would have if the snow melted and was spread evenly over the whole grid box. The ECMWF Integrated Forecast System represents snow as a single additional layer over the uppermost soil level. The snow may cover all or part of the grid box."
         },
         {
           "name": "snowfall",
           "units": "m of water equivalent",
-          "min": 0,
-          "max": 0,
-          "description": "Accumulated total snow that has fallen to the Earth's surface."
+          "description": "Accumulated total snow that has fallen to the Earth's surface. It consists of snow due to the large-scale atmospheric flow (horizontal scales greater than around a few hundred meters) and convection where smaller scale areas (around 5km to a few hundred kilometers) of warm air rise. If snow has melted during the period over which this variable was accumulated, then it will be higher than the snow depth. This variable is the total amount of water accumulated from the beginning of the forecast time to the end of the forecast step. The units given measure the depth the water would have if the snow melted and was spread evenly over the grid box. Care should be taken when comparing model variables with observations, because observations are often local to a particular point in space and time, rather than representing averages over a model grid box and model time step."
         },
         {
           "name": "snowmelt",
           "units": "m of water equivalent",
-          "min": 0,
-          "max": 0,
-          "description": "Melting of snow averaged over the grid box."
+          "description": "Melting of snow averaged over the grid box (to find melt over snow, divide by snow fraction). This variable is accumulated from the beginning of the forecast time to the end of the forecast step."
         },
         {
           "name": "temperature_of_snow_layer",
           "units": "K",
-          "min": 0,
-          "max": 0,
-          "description": "Gives the temperature of the snow layer from the ground to the snow-air interface."
+          "description": "This variable gives the temperature of the snow layer from the ground to the snow-air interface. The ECMWF Integrated Forecast System (IFS) model represents snow as a single additional layer over the uppermost soil level. The snow may cover all or part of the grid box."
         },
         {
           "name": "skin_reservoir_content",
           "units": "m of water equivalent",
-          "min": 0,
-          "max": 0,
-          "description": "Amount of water in the vegetation canopy and/or in a thin layer on the soil."
+          "description": "Amount of water in the vegetation canopy and/or in a thin layer on the soil. It represents the amount of rain intercepted by foliage, and water from dew. The maximum amount of 'skin reservoir content' a grid box can hold depends on the type of vegetation, and may be zero. Water leaves the 'skin reservoir' by evaporation."
         },
         {
           "name": "volumetric_soil_water_layer_1",
           "units": "Volume fraction",
-          "min": 0,
-          "max": 0,
-          "description": "Volume of water in soil layer 1 (0 - 7 cm)."
+          "description": "Volume of water in soil layer 1 (0 - 7 cm) of the ECMWF Integrated Forecasting System. The surface is at 0 cm. The volumetric soil water is associated with the soil texture (or classification), soil depth, and the underlying groundwater level."
         },
         {
           "name": "volumetric_soil_water_layer_2",
           "units": "Volume fraction",
-          "min": 0,
-          "max": 0,
-          "description": "Volume of water in soil layer 2 (7 -28 cm)."
+          "description": "Volume of water in soil layer 2 (7 -28 cm) of the ECMWF Integrated Forecasting System."
         },
         {
           "name": "volumetric_soil_water_layer_3",
           "units": "Volume fraction",
-          "min": 0,
-          "max": 0,
-          "description": "Volume of water in soil layer 3 (28 - 100 cm)."
+          "description": "Volume of water in soil layer 3 (28-100 cm) of the ECMWF Integrated Forecasting System."
         },
         {
           "name": "volumetric_soil_water_layer_4",
           "units": "Volume fraction",
-          "min": 0,
-          "max": 0,
-          "description": "Volume of water in soil layer 4 (100 - 289 cm)."
+          "description": "Volume of water in soil layer 4 (100-289 cm) of the ECMWF Integrated Forecasting System."
         },
         {
           "name": "forecast_albedo",
           "units": "",
-          "min": 0,
-          "max": 0,
-          "description": "Forecast surface albedo."
+          "description": "Is a measure of the reflectivity of the Earth's surface. It is the fraction of solar (shortwave) radiation reflected by Earth's surface, across the solar spectrum, for both direct and diffuse radiation. Values are between 0 and 1. Typically, snow and ice have high reflectivity with albedo values of 0.8 and above, land has intermediate values between about 0.1 and 0.4 and the ocean has low values of 0.1 or less. Radiation from the Sun (solar, or shortwave, radiation) is partly reflected back to space by clouds and particles in the atmosphere (aerosols) and some of it is absorbed. The rest is incident on the Earth's surface, where some of it is reflected. The portion that is reflected by the Earth's surface depends on the albedo. In the ECMWF Integrated Forecasting System (IFS), a climatological background albedo (observed values averaged over a period of several years) is used, modified by the model over water, ice and snow. Albedo is often shown as a percentage (%)."
         },
         {
           "name": "surface_latent_heat_flux",
           "units": "J/m^2",
-          "min": 0,
-          "max": 0,
-          "description": "Amount of energy going from the surface to the air through evaporation, integrated over the period specified."
+          "description": "Exchange of latent heat with the surface through turbulent diffusion. This variables is accumulated from the beginning of the forecast time to the end of the forecast step. By model convention, downward fluxes are positive."
         },
         {
           "name": "surface_net_solar_radiation",
           "units": "J/m^2",
-          "min": 0,
-          "max": 0,
-          "description": "Amount of solar radiation (shortwave) reaching the surface of the Earth (both direct and diffuse) minus the amount reflected by the Earth's surface, integrated over the period specified."
+          "description": "Amount of solar radiation (also known as shortwave radiation) reaching the surface of the Earth (both direct and diffuse) minus the amount reflected by the Earth's surface (which is governed by the albedo). Radiation from the Sun (solar, or shortwave, radiation) is partly reflected back to space by clouds and particles in the atmosphere (aerosols) and some of it is absorbed. The rest is incident on the Earth's surface, where some of it is reflected. The difference between downward and reflected solar radiation is the surface net solar radiation. This variable is accumulated from the beginning of the forecast time to the end of the forecast step. The units are joules per square meter (J m-2). To convert to watts per square meter (W m-2), the accumulated values should be divided by the accumulation period expressed in seconds. The ECMWF convention for vertical fluxes is positive downwards."
         },
         {
           "name": "surface_net_thermal_radiation",
           "units": "J/m^2",
-          "min": 0,
-          "max": 0,
-          "description": "Amount of thermal radiation (longwave) emitted from the Earth's surface minus the amount of thermal radiation emitted by the atmosphere and absorbed by the surface, integrated over the period specified."
+          "description": "Net thermal radiation at the surface. Accumulated field from the beginning of the forecast time to the end of the forecast step. By model convention downward fluxes are positive."
         },
         {
           "name": "surface_sensible_heat_flux",
           "units": "J/m^2",
-          "min": 0,
-          "max": 0,
-          "description": "Transfer of heat between the Earth's surface and the atmosphere through the effects of turbulent air motion, integrated over the period specified."
+          "description": "Transfer of heat between the Earth's surface and the atmosphere through the effects of turbulent air motion (but excluding any heat transfer resulting from condensation or evaporation). The magnitude of the sensible heat flux is governed by the difference in temperature between the surface and the overlying atmosphere, wind speed and the surface roughness. For example, cold air overlying a warm surface would produce a sensible heat flux from the land (or ocean) into the atmosphere. This is a single level variable and it is accumulated from the beginning of the forecast time to the end of the forecast step. The units are joules per square meter (J m-2). To convert to watts per square meter (W m-2), the accumulated values should be divided by the accumulation period expressed in seconds. The ECMWF convention for vertical fluxes is positive downwards."
         },
         {
           "name": "surface_solar_radiation_downwards",
           "units": "J/m^2",
-          "min": 0,
-          "max": 0,
-          "description": "Amount of solar radiation (shortwave) reaching the surface of the Earth (both direct and diffuse), integrated over the period specified."
+          "description": "Amount of solar radiation (also known as shortwave radiation) reaching the surface of the Earth. This variable comprises both direct and diffuse solar radiation. Radiation from the Sun (solar, or shortwave, radiation) is partly reflected back to space by clouds and particles in the atmosphere (aerosols) and some of it is absorbed. The rest is incident on the Earth's surface (represented by this variable). To a reasonably good approximation, this variable is the model equivalent of what would be measured by a pyranometer (an instrument used for measuring solar radiation) at the surface. However, care should be taken when comparing model variables with observations, because observations are often local to a particular point in space and time, rather than representing averages over a model grid box and model time step. This variable is accumulated from the beginning of the forecast time to the end of the forecast step. The units are joules per square meter (J m-2). To convert to watts per square meter (W m-2), the accumulated values should be divided by the accumulation period expressed in seconds. The ECMWF convention for vertical fluxes is positive downwards."
         },
         {
           "name": "surface_thermal_radiation_downwards",
           "units": "J/m^2",
-          "min": 0,
-          "max": 0,
-          "description": "Amount of thermal radiation (longwave) emitted by the atmosphere and absorbed by the Earth's surface, integrated over the period specified."
+          "description": "Amount of thermal (also known as longwave or terrestrial) radiation emitted by the atmosphere and clouds that reaches the Earth's surface. The surface of the Earth emits thermal radiation, some of which is absorbed by the atmosphere and clouds. The atmosphere and clouds likewise emit thermal radiation in all directions, some of which reaches the surface (represented by this variable). This variable is accumulated from the beginning of the forecast time to the end of the forecast step. The units are joules per square meter (J m-2). To convert to watts per square meter (W m-2), the accumulated values should be divided by the accumulation period expressed in seconds. The ECMWF convention for vertical fluxes is positive downwards."
         },
         {
           "name": "evaporation_from_bare_soil",
           "units": "m of water equivalent",
-          "min": 0,
-          "max": 0,
-          "description": "Amount of evaporation from bare soil at the top of the land surface, integrated over the period specified."
+          "description": "The amount of evaporation from bare soil at the top of the land surface. This variable is accumulated from the beginning of the forecast time to the end of the forecast step."
         },
         {
           "name": "evaporation_from_open_water_surfaces_excluding_oceans",
           "units": "m of water equivalent",
-          "min": 0,
-          "max": 0,
-          "description": "Amount of evaporation from open water surfaces (lakes, reservoirs, rivers, wetlands), integrated over the period specified."
+          "description": "Amount of evaporation from surface water storage like lakes and inundated areas but excluding oceans. This variable is accumulated from the beginning of the forecast time to the end of the forecast step."
         },
         {
           "name": "evaporation_from_the_top_of_canopy",
           "units": "m of water equivalent",
-          "min": 0,
-          "max": 0,
-          "description": "Amount of evaporation from the canopy interception reservoir, integrated over the period specified."
+          "description": "The amount of evaporation from the canopy interception reservoir at the top of the canopy. This variable is accumulated from the beginning of the forecast time to the end of the forecast step."
         },
         {
           "name": "evaporation_from_vegetation_transpiration",
           "units": "m of water equivalent",
-          "min": 0,
-          "max": 0,
-          "description": "Amount of evapotranspiration from vegetation, integrated over the period specified."
+          "description": "Amount of evaporation from vegetation transpiration. This has the same meaning as root extraction i.e. the amount of water extracted from the different soil layers. This variable is accumulated from the beginning of the forecast time to the end of the forecast step."
         },
         {
           "name": "potential_evaporation",
           "units": "m",
-          "min": 0,
-          "max": 0,
-          "description": "Amount of evaporation that would occur from a vegetation canopy for the given atmospheric conditions, assuming ideal conditions, integrated over the period specified."
+          "description": "Potential evaporation (pev) in the current ECMWF model is computed, by making a second call to the surface energy balance routine with the vegetation variables set to \"crops/mixed farming\" and assuming no stress from soil moisture. In other words, evaporation is computed for agricultural land as if it is well watered and assuming that the atmosphere is not affected by this artificial surface condition. The latter may not always be realistic. Although pev is meant to provide an estimate of irrigation requirements, the method can give unrealistic results in arid conditions due to too strong evaporation forced by dry air. This variable is accumulated from the beginning of the forecast time to the end of the forecast step."
         },
         {
           "name": "runoff",
           "units": "m",
-          "min": 0,
-          "max": 0,
-          "description": "Amount of water accumulated at the surface that exceeds the infiltration capacity of the soil and does not evaporate (includes both surface and sub-surface runoff), integrated over the period specified."
+          "description": "Some water from rainfall, melting snow, or deep in the soil, stays stored in the soil. Otherwise, the water drains away, either over the surface (surface runoff), or under the ground (sub-surface runoff) and the sum of these two is simply called 'runoff'. This variable is the total amount of water accumulated from the beginning of the forecast time to the end of the forecast step. The units of runoff are depth in meters. This is the depth the water would have if it were spread evenly over the grid box. Care should be taken when comparing model variables with observations, because observations are often local to a particular point rather than averaged over a grid square area. Observations are also often taken in different units, such as mm/day, rather than the accumulated meters produced here. Runoff is a measure of the availability of water in the soil, and can, for example, be used as an indicator of drought or flood. More information about how runoff is calculated is given in the IFS Physical Processes documentation."
         },
         {
           "name": "snow_evaporation",
           "units": "m of water equivalent",
-          "min": 0,
-          "max": 0,
-          "description": "Amount of evaporation from the snow surface, integrated over the period specified."
+          "description": "Evaporation from snow averaged over the grid box (to find flux over snow, divide by snow fraction). This variable is accumulated from the beginning of the forecast time to the end of the forecast step."
         },
         {
           "name": "sub_surface_runoff",
           "units": "m",
-          "min": 0,
-          "max": 0,
-          "description": "Amount of water draining through the soil and accumulating at the base of the soil column, integrated over the period specified."
+          "description": "Some water from rainfall, melting snow, or deep in the soil, stays stored in the soil. Otherwise, the water drains away, either over the surface (surface runoff), or under the ground(sub-surface runoff) and the sum of these two is simply called 'runoff'. This variable is accumulated from the beginning of the forecast time to the end of the forecast step. The units of runoff are depth in meters. This is the depth the water would have if it were spread evenly over the grid box. Care should be taken when comparing model variables with observations, because observations are often local to a particular point rather than averaged over a grid square area. Observations are also often taken in different units, such as mm/day, rather than the accumulated meters produced here. Runoff is a measure of the availability of water in the soil, and can, for example, be used as an indicator of drought or flood. More information about how runoff is calculated is given in the IFS Physical Processes documentation."
         },
         {
           "name": "surface_runoff",
           "units": "m",
-          "min": 0,
-          "max": 0,
-          "description": "Amount of water accumulated at the surface that exceeds the infiltration capacity of the soil and does not evaporate, integrated over the period specified."
+          "description": "Some water from rainfall, melting snow, or deep in the soil, stays stored in the soil. Otherwise, the water drains away, either over the surface (surface runoff), or under the ground (sub-surface runoff) and the sum of these two is simply called 'runoff'. This variable is the total amount of water accumulated from the beginning of the forecast time to the end of the forecast step. The units of runoff are depth in meters. This is the depth the water would have if it were spread evenly over the grid box. Care should be taken when comparing model variables with observations, because observations are often local to a particular point rather than averaged over a grid square area. Observations are also often taken in different units, such as mm/day, rather than the accumulated meters produced here. Runoff is a measure of the availability of water in the soil, and can, for example, be used as an indicator of drought or flood. More information about how runoff is calculated is given in the IFS Physical Processes documentation."
         },
         {
           "name": "total_evaporation",
           "units": "m of water equivalent",
-          "min": 0,
-          "max": 0,
-          "description": "Amount of evaporation and transpiration from the Earth's surface and vegetation, integrated over the period specified."
+          "description": "Accumulated amount of water that has evaporated from the Earth's surface, including a simplified representation of transpiration (from vegetation), into vapor in the air above. This variable is accumulated from the beginning of the forecast to the end of the forecast step. The ECMWF Integrated Forecasting System convention is that downward fluxes are positive. Therefore, negative values indicate evaporation and positive values indicate condensation."
         },
         {
           "name": "u_component_of_wind_10m",
           "units": "m/s",
-          "min": 0,
-          "max": 0,
-          "description": "Eastward component of the 10m wind. It is the horizontal speed of air moving towards the east."
+          "description": "Eastward component of the 10m wind. It is the horizontal speed of air moving towards the east, at a height of ten meters above the surface of the Earth, in meters per second. Care should be taken when comparing this variable with observations, because wind observations vary on small space and time scales and are affected by the local terrain, vegetation and buildings that are represented only on average in the ECMWF Integrated Forecasting System. This variable can be combined with the V component of 10m wind to give the speed and direction of the horizontal 10m wind."
         },
         {
           "name": "v_component_of_wind_10m",
           "units": "m/s",
-          "min": 0,
-          "max": 0,
-          "description": "Northward component of the 10m wind. It is the horizontal speed of air moving towards the north."
+          "description": "Northward component of the 10m wind. It is the horizontal speed of air moving towards the north, at a height of ten meters above the surface of the Earth, in meters per second. Care should be taken when comparing this variable with observations, because wind observations vary on small space and time scales and are affected by the local terrain, vegetation and buildings that are represented only on average in the ECMWF Integrated Forecasting System. This variable can be combined with the U component of 10m wind to give the speed and direction of the horizontal 10m wind."
         },
         {
           "name": "surface_pressure",
           "units": "Pa",
-          "min": 0,
-          "max": 0,
-          "description": "Pressure (force per unit area) of the atmosphere on the surface of land, sea and in-land water. It is a measure of the weight of all the air in a column vertically above the point of measurement."
+          "description": "Pressure (force per unit area) of the atmosphere on the surface of land, sea and in-land water. It is a measure of the weight of all the air in a column vertically above the area of the Earth's surface represented at a fixed point. Surface pressure is often used in combination with temperature to calculate air density. The strong variation of pressure with altitude makes it difficult to see the low and high pressure systems over mountainous areas, so mean sea level pressure, rather than surface pressure, is normally used for this purpose. The units of this variable are Pascals (Pa). Surface pressure is often measured in hPa and sometimes is presented in the old units of millibars, mb (1 hPa = 1 mb = 100 Pa)."
         },
         {
           "name": "total_precipitation",
           "units": "m",
-          "min": 0,
-          "max": 0,
-          "description": "Total precipitation (rain and snow) integrated over the period specified."
+          "description": "Accumulated liquid and frozen water, including rain and snow, that falls to the Earth's surface. It is the sum of large-scale precipitation (that precipitation which is generated by large-scale weather patterns, such as troughs and cold fronts) and convective precipitation (generated by convection which occurs when air at lower levels in the atmosphere is warmer and less dense than the air above, so it rises). Precipitation variables do not include fog, dew or the precipitation that evaporates in the atmosphere before it lands at the surface of the Earth. This variable is accumulated from the beginning of the forecast time to the end of the forecast step. The units of precipitation are depth in meters. It is the depth the water would have if it were spread evenly over the grid box. Care should be taken when comparing model variables with observations, because observations are often local to a particular point in space and time, rather than representing averages over a model grid box and model time step."
         },
         {
           "name": "leaf_area_index_high_vegetation",
           "units": "Area fraction",
-          "min": 0,
-          "max": 0,
-          "description": "One half of the total green leaf area per unit horizontal ground surface area for high vegetation type."
+          "description": "One-half of the total green leaf area per unit horizontal ground surface area for high vegetation type."
         },
         {
           "name": "leaf_area_index_low_vegetation",
           "units": "Area fraction",
-          "min": 0,
-          "max": 0,
-          "description": "One half of the total green leaf area per unit horizontal ground surface area for low vegetation type."
+          "description": "One-half of the total green leaf area per unit horizontal ground surface area for low vegetation type."
         },
         {
-          "name": "dewpoint_temperature_2m_min",
-          "units": "K",
-          "min": 0,
-          "max": 0,
-          "description": "Daily minimum dewpoint_temperature_2m value"
-        },
-        {
-          "name": "dewpoint_temperature_2m_max",
-          "units": "K",
-          "min": 0,
-          "max": 0,
-          "description": "Daily maximum dewpoint_temperature_2m value"
-        },
-        {
-          "name": "temperature_2m_min",
-          "units": "K",
-          "min": 0,
-          "max": 0,
-          "description": "Daily minimum temperature_2m value"
-        },
-        {
-          "name": "temperature_2m_max",
-          "units": "K",
-          "min": 0,
-          "max": 0,
-          "description": "Daily maximum temperature_2m value"
-        },
-        {
-          "name": "skin_temperature_min",
-          "units": "K",
-          "min": 0,
-          "max": 0,
-          "description": "Daily minimum skin_temperature value"
-        },
-        {
-          "name": "skin_temperature_max",
-          "units": "K",
-          "min": 0,
-          "max": 0,
-          "description": "Daily maximum skin_temperature value"
-        },
-        {
-          "name": "soil_temperature_level_1_min",
-          "units": "K",
-          "min": 0,
-          "max": 0,
-          "description": "Daily minimum soil_temperature_level_1 value"
-        },
-        {
-          "name": "soil_temperature_level_1_max",
-          "units": "K",
-          "min": 0,
-          "max": 0,
-          "description": "Daily maximum soil_temperature_level_1 value"
-        },
-        {
-          "name": "soil_temperature_level_2_min",
-          "units": "K",
-          "min": 0,
-          "max": 0,
-          "description": "Daily minimum soil_temperature_level_2 value"
-        },
-        {
-          "name": "soil_temperature_level_2_max",
-          "units": "K",
-          "min": 0,
-          "max": 0,
-          "description": "Daily maximum soil_temperature_level_2 value"
-        },
-        {
-          "name": "soil_temperature_level_3_min",
-          "units": "K",
-          "min": 0,
-          "max": 0,
-          "description": "Daily minimum soil_temperature_level_3 value"
-        },
-        {
-          "name": "soil_temperature_level_3_max",
-          "units": "K",
-          "min": 0,
-          "max": 0,
-          "description": "Daily maximum soil_temperature_level_3 value"
-        },
-        {
-          "name": "soil_temperature_level_4_min",
-          "units": "K",
-          "min": 0,
-          "max": 0,
-          "description": "Daily minimum soil_temperature_level_4 value"
-        },
-        {
-          "name": "soil_temperature_level_4_max",
-          "units": "K",
-          "min": 0,
-          "max": 0,
-          "description": "Daily maximum soil_temperature_level_4 value"
-        },
-        {
-          "name": "lake_bottom_temperature_min",
-          "units": "K",
-          "min": 0,
-          "max": 0,
-          "description": "Daily minimum lake_bottom_temperature value"
-        },
-        {
-          "name": "lake_bottom_temperature_max",
-          "units": "K",
-          "min": 0,
-          "max": 0,
-          "description": "Daily maximum lake_bottom_temperature value"
-        },
-        {
-          "name": "lake_ice_depth_min",
-          "units": "m",
-          "min": 0,
-          "max": 0,
-          "description": "Daily minimum lake_ice_depth value"
-        },
-        {
-          "name": "lake_ice_depth_max",
-          "units": "m",
-          "min": 0,
-          "max": 0,
-          "description": "Daily maximum lake_ice_depth value"
-        },
-        {
-          "name": "lake_ice_temperature_min",
-          "units": "K",
-          "min": 0,
-          "max": 0,
-          "description": "Daily minimum lake_ice_temperature value"
-        },
-        {
-          "name": "lake_ice_temperature_max",
-          "units": "K",
-          "min": 0,
-          "max": 0,
-          "description": "Daily maximum lake_ice_temperature value"
-        },
-        {
-          "name": "lake_mix_layer_depth_min",
-          "units": "m",
-          "min": 0,
-          "max": 0,
-          "description": "Daily minimum lake_mix_layer_depth value"
-        },
-        {
-          "name": "lake_mix_layer_depth_max",
-          "units": "m",
-          "min": 0,
-          "max": 0,
-          "description": "Daily maximum lake_mix_layer_depth value"
-        },
-        {
-          "name": "lake_mix_layer_temperature_min",
-          "units": "K",
-          "min": 0,
-          "max": 0,
-          "description": "Daily minimum lake_mix_layer_temperature value"
-        },
-        {
-          "name": "lake_mix_layer_temperature_max",
-          "units": "K",
-          "min": 0,
-          "max": 0,
-          "description": "Daily maximum lake_mix_layer_temperature value"
-        },
-        {
-          "name": "lake_shape_factor_min",
-          "units": "",
-          "min": 0,
-          "max": 0,
-          "description": "Daily minimum lake_shape_factor value"
-        },
-        {
-          "name": "lake_shape_factor_max",
-          "units": "",
-          "min": 0,
-          "max": 0,
-          "description": "Daily maximum lake_shape_factor value"
-        },
-        {
-          "name": "lake_total_layer_temperature_min",
-          "units": "K",
-          "min": 0,
-          "max": 0,
-          "description": "Daily minimum lake_total_layer_temperature value"
-        },
-        {
-          "name": "lake_total_layer_temperature_max",
-          "units": "K",
-          "min": 0,
-          "max": 0,
-          "description": "Daily maximum lake_total_layer_temperature value"
-        },
-        {
-          "name": "snow_albedo_min",
-          "units": "",
-          "min": 0,
-          "max": 0,
-          "description": "Daily minimum snow_albedo value"
-        },
-        {
-          "name": "snow_albedo_max",
-          "units": "",
-          "min": 0,
-          "max": 0,
-          "description": "Daily maximum snow_albedo value"
-        },
-        {
-          "name": "snow_cover_min",
-          "units": "",
-          "min": 0,
-          "max": 0,
-          "description": "Daily minimum snow_cover value"
-        },
-        {
-          "name": "snow_cover_max",
-          "units": "",
-          "min": 0,
-          "max": 0,
-          "description": "Daily maximum snow_cover value"
-        },
-        {
-          "name": "snow_density_min",
-          "units": "kg/m^3",
-          "min": 0,
-          "max": 0,
-          "description": "Daily minimum snow_density value"
-        },
-        {
-          "name": "snow_density_max",
-          "units": "kg/m^3",
-          "min": 0,
-          "max": 0,
-          "description": "Daily maximum snow_density value"
-        },
-        {
-          "name": "snow_depth_min",
-          "units": "m",
-          "min": 0,
-          "max": 0,
-          "description": "Daily minimum snow_depth value"
-        },
-        {
-          "name": "snow_depth_max",
-          "units": "m",
-          "min": 0,
-          "max": 0,
-          "description": "Daily maximum snow_depth value"
-        },
-        {
-          "name": "snow_depth_water_equivalent_min",
+          "name": "snowfall_hourly",
           "units": "m of water equivalent",
-          "min": 0,
-          "max": 0,
-          "description": "Daily minimum snow_depth_water_equivalent value"
+          "description": "snowfall disaggregated from the original cumulative values into hourly values"
         },
         {
-          "name": "snow_depth_water_equivalent_max",
+          "name": "snowmelt_hourly",
           "units": "m of water equivalent",
-          "min": 0,
-          "max": 0,
-          "description": "Daily maximum snow_depth_water_equivalent value"
+          "description": "snowmelt disaggregated from the original cumulative values into hourly values"
         },
         {
-          "name": "snowfall_min",
-          "units": "m of water equivalent",
-          "min": 0,
-          "max": 0,
-          "description": "Daily minimum snowfall value"
-        },
-        {
-          "name": "snowfall_max",
-          "units": "m of water equivalent",
-          "min": 0,
-          "max": 0,
-          "description": "Daily maximum snowfall value"
-        },
-        {
-          "name": "snowmelt_min",
-          "units": "m of water equivalent",
-          "min": 0,
-          "max": 0,
-          "description": "Daily minimum snowmelt value"
-        },
-        {
-          "name": "snowmelt_max",
-          "units": "m of water equivalent",
-          "min": 0,
-          "max": 0,
-          "description": "Daily maximum snowmelt value"
-        },
-        {
-          "name": "temperature_of_snow_layer_min",
-          "units": "K",
-          "min": 0,
-          "max": 0,
-          "description": "Daily minimum temperature_of_snow_layer value"
-        },
-        {
-          "name": "temperature_of_snow_layer_max",
-          "units": "K",
-          "min": 0,
-          "max": 0,
-          "description": "Daily maximum temperature_of_snow_layer value"
-        },
-        {
-          "name": "skin_reservoir_content_min",
-          "units": "m of water equivalent",
-          "min": 0,
-          "max": 0,
-          "description": "Daily minimum skin_reservoir_content value"
-        },
-        {
-          "name": "skin_reservoir_content_max",
-          "units": "m of water equivalent",
-          "min": 0,
-          "max": 0,
-          "description": "Daily maximum skin_reservoir_content value"
-        },
-        {
-          "name": "volumetric_soil_water_layer_1_min",
-          "units": "Volume fraction",
-          "min": 0,
-          "max": 0,
-          "description": "Daily minimum volumetric_soil_water_layer_1 value"
-        },
-        {
-          "name": "volumetric_soil_water_layer_1_max",
-          "units": "Volume fraction",
-          "min": 0,
-          "max": 0,
-          "description": "Daily maximum volumetric_soil_water_layer_1 value"
-        },
-        {
-          "name": "volumetric_soil_water_layer_2_min",
-          "units": "Volume fraction",
-          "min": 0,
-          "max": 0,
-          "description": "Daily minimum volumetric_soil_water_layer_2 value"
-        },
-        {
-          "name": "volumetric_soil_water_layer_2_max",
-          "units": "Volume fraction",
-          "min": 0,
-          "max": 0,
-          "description": "Daily maximum volumetric_soil_water_layer_2 value"
-        },
-        {
-          "name": "volumetric_soil_water_layer_3_min",
-          "units": "Volume fraction",
-          "min": 0,
-          "max": 0,
-          "description": "Daily minimum volumetric_soil_water_layer_3 value"
-        },
-        {
-          "name": "volumetric_soil_water_layer_3_max",
-          "units": "Volume fraction",
-          "min": 0,
-          "max": 0,
-          "description": "Daily maximum volumetric_soil_water_layer_3 value"
-        },
-        {
-          "name": "volumetric_soil_water_layer_4_min",
-          "units": "Volume fraction",
-          "min": 0,
-          "max": 0,
-          "description": "Daily minimum volumetric_soil_water_layer_4 value"
-        },
-        {
-          "name": "volumetric_soil_water_layer_4_max",
-          "units": "Volume fraction",
-          "min": 0,
-          "max": 0,
-          "description": "Daily maximum volumetric_soil_water_layer_4 value"
-        },
-        {
-          "name": "forecast_albedo_min",
-          "units": "",
-          "min": 0,
-          "max": 0,
-          "description": "Daily minimum forecast_albedo value"
-        },
-        {
-          "name": "forecast_albedo_max",
-          "units": "",
-          "min": 0,
-          "max": 0,
-          "description": "Daily maximum forecast_albedo value"
-        },
-        {
-          "name": "surface_latent_heat_flux_min",
+          "name": "surface_latent_heat_flux_hourly",
           "units": "J/m^2",
-          "min": 0,
-          "max": 0,
-          "description": "Daily minimum surface_latent_heat_flux value"
+          "description": "surface latent heat flux disaggregated from the original cumulative values into hourly values"
         },
         {
-          "name": "surface_latent_heat_flux_max",
+          "name": "surface_net_solar_radiation_hourly",
           "units": "J/m^2",
-          "min": 0,
-          "max": 0,
-          "description": "Daily maximum surface_latent_heat_flux value"
+          "description": "surface net solar radiation disaggregated from the original cumulative values into hourly values"
         },
         {
-          "name": "surface_net_solar_radiation_min",
+          "name": "surface_net_thermal_radiation_hourly",
           "units": "J/m^2",
-          "min": 0,
-          "max": 0,
-          "description": "Daily minimum surface_net_solar_radiation value"
+          "description": "surface net thermal radiation disaggregated from the original cumulative values into hourly values"
         },
         {
-          "name": "surface_net_solar_radiation_max",
+          "name": "surface_sensible_heat_flux_hourly",
           "units": "J/m^2",
-          "min": 0,
-          "max": 0,
-          "description": "Daily maximum surface_net_solar_radiation value"
+          "description": "surface sensible heat flux disaggregated from the original cumulative values into hourly values"
         },
         {
-          "name": "surface_net_thermal_radiation_min",
+          "name": "surface_solar_radiation_downwards_hourly",
           "units": "J/m^2",
-          "min": 0,
-          "max": 0,
-          "description": "Daily minimum surface_net_thermal_radiation value"
+          "description": "surface solar radiation downwards disaggregated from the original cumulative values into hourly values"
         },
         {
-          "name": "surface_net_thermal_radiation_max",
+          "name": "surface_thermal_radiation_downwards_hourly",
           "units": "J/m^2",
-          "min": 0,
-          "max": 0,
-          "description": "Daily maximum surface_net_thermal_radiation value"
+          "description": "surface thermal radiation downwards disaggregated from the original cumulative values into hourly values"
         },
         {
-          "name": "surface_sensible_heat_flux_min",
-          "units": "J/m^2",
-          "min": 0,
-          "max": 0,
-          "description": "Daily minimum surface_sensible_heat_flux value"
-        },
-        {
-          "name": "surface_sensible_heat_flux_max",
-          "units": "J/m^2",
-          "min": 0,
-          "max": 0,
-          "description": "Daily maximum surface_sensible_heat_flux value"
-        },
-        {
-          "name": "surface_solar_radiation_downwards_min",
-          "units": "J/m^2",
-          "min": 0,
-          "max": 0,
-          "description": "Daily minimum surface_solar_radiation_downwards value"
-        },
-        {
-          "name": "surface_solar_radiation_downwards_max",
-          "units": "J/m^2",
-          "min": 0,
-          "max": 0,
-          "description": "Daily maximum surface_solar_radiation_downwards value"
-        },
-        {
-          "name": "surface_thermal_radiation_downwards_min",
-          "units": "J/m^2",
-          "min": 0,
-          "max": 0,
-          "description": "Daily minimum surface_thermal_radiation_downwards value"
-        },
-        {
-          "name": "surface_thermal_radiation_downwards_max",
-          "units": "J/m^2",
-          "min": 0,
-          "max": 0,
-          "description": "Daily maximum surface_thermal_radiation_downwards value"
-        },
-        {
-          "name": "evaporation_from_bare_soil_min",
+          "name": "evaporation_from_bare_soil_hourly",
           "units": "m of water equivalent",
-          "min": 0,
-          "max": 0,
-          "description": "Daily minimum evaporation_from_bare_soil value"
+          "description": "evaporation from bare soil disaggregated from the original cumulative values into hourly values"
         },
         {
-          "name": "evaporation_from_bare_soil_max",
+          "name": "evaporation_from_open_water_surfaces_excluding_oceans_hourly",
           "units": "m of water equivalent",
-          "min": 0,
-          "max": 0,
-          "description": "Daily maximum evaporation_from_bare_soil value"
+          "description": "evaporation from open water surfaces excluding oceans disaggregated from the original cumulative values into hourly values"
         },
         {
-          "name": "evaporation_from_open_water_surfaces_excluding_oceans_min",
+          "name": "evaporation_from_the_top_of_canopy_hourly",
           "units": "m of water equivalent",
-          "min": 0,
-          "max": 0,
-          "description": "Daily minimum evaporation_from_open_water_surfaces_excluding_oceans value"
+          "description": "evaporation from the top of canopy disaggregated from the original cumulative values into hourly values"
         },
         {
-          "name": "evaporation_from_open_water_surfaces_excluding_oceans_max",
+          "name": "evaporation_from_vegetation_transpiration_hourly",
           "units": "m of water equivalent",
-          "min": 0,
-          "max": 0,
-          "description": "Daily maximum evaporation_from_open_water_surfaces_excluding_oceans value"
+          "description": "evaporation from vegetation transpiration disaggregated from the original cumulative values into hourly values"
         },
         {
-          "name": "evaporation_from_the_top_of_canopy_min",
-          "units": "m of water equivalent",
-          "min": 0,
-          "max": 0,
-          "description": "Daily minimum evaporation_from_the_top_of_canopy value"
-        },
-        {
-          "name": "evaporation_from_the_top_of_canopy_max",
-          "units": "m of water equivalent",
-          "min": 0,
-          "max": 0,
-          "description": "Daily maximum evaporation_from_the_top_of_canopy value"
-        },
-        {
-          "name": "evaporation_from_vegetation_transpiration_min",
-          "units": "m of water equivalent",
-          "min": 0,
-          "max": 0,
-          "description": "Daily minimum evaporation_from_vegetation_transpiration value"
-        },
-        {
-          "name": "evaporation_from_vegetation_transpiration_max",
-          "units": "m of water equivalent",
-          "min": 0,
-          "max": 0,
-          "description": "Daily maximum evaporation_from_vegetation_transpiration value"
-        },
-        {
-          "name": "potential_evaporation_min",
+          "name": "potential_evaporation_hourly",
           "units": "m",
-          "min": 0,
-          "max": 0,
-          "description": "Daily minimum potential_evaporation value"
+          "description": "potential evaporation disaggregated from the original cumulative values into hourly values"
         },
         {
-          "name": "potential_evaporation_max",
+          "name": "runoff_hourly",
           "units": "m",
-          "min": 0,
-          "max": 0,
-          "description": "Daily maximum potential_evaporation value"
+          "description": "runoff disaggregated from the original cumulative values into hourly values"
         },
         {
-          "name": "runoff_min",
-          "units": "m",
-          "min": 0,
-          "max": 0,
-          "description": "Daily minimum runoff value"
-        },
-        {
-          "name": "runoff_max",
-          "units": "m",
-          "min": 0,
-          "max": 0,
-          "description": "Daily maximum runoff value"
-        },
-        {
-          "name": "snow_evaporation_min",
+          "name": "snow_evaporation_hourly",
           "units": "m of water equivalent",
-          "min": 0,
-          "max": 0,
-          "description": "Daily minimum snow_evaporation value"
+          "description": "snow evaporation disaggregated from the original cumulative values into hourly values"
         },
         {
-          "name": "snow_evaporation_max",
+          "name": "sub_surface_runoff_hourly",
+          "units": "m",
+          "description": "sub surface runoff disaggregated from the original cumulative values into hourly values"
+        },
+        {
+          "name": "surface_runoff_hourly",
+          "units": "m",
+          "description": "surface runoff disaggregated from the original cumulative values into hourly values"
+        },
+        {
+          "name": "total_evaporation_hourly",
           "units": "m of water equivalent",
-          "min": 0,
-          "max": 0,
-          "description": "Daily maximum snow_evaporation value"
+          "description": "total evaporation disaggregated from the original cumulative values into hourly values"
         },
         {
-          "name": "sub_surface_runoff_min",
+          "name": "total_precipitation_hourly",
           "units": "m",
-          "min": 0,
-          "max": 0,
-          "description": "Daily minimum sub_surface_runoff value"
-        },
-        {
-          "name": "sub_surface_runoff_max",
-          "units": "m",
-          "min": 0,
-          "max": 0,
-          "description": "Daily maximum sub_surface_runoff value"
-        },
-        {
-          "name": "surface_runoff_min",
-          "units": "m",
-          "min": 0,
-          "max": 0,
-          "description": "Daily minimum surface_runoff value"
-        },
-        {
-          "name": "surface_runoff_max",
-          "units": "m",
-          "min": 0,
-          "max": 0,
-          "description": "Daily maximum surface_runoff value"
-        },
-        {
-          "name": "total_evaporation_min",
-          "units": "m of water equivalent",
-          "min": 0,
-          "max": 0,
-          "description": "Daily minimum total_evaporation value"
-        },
-        {
-          "name": "total_evaporation_max",
-          "units": "m of water equivalent",
-          "min": 0,
-          "max": 0,
-          "description": "Daily maximum total_evaporation value"
-        },
-        {
-          "name": "u_component_of_wind_10m_min",
-          "units": "m/s",
-          "min": 0,
-          "max": 0,
-          "description": "Daily minimum u_component_of_wind_10m value"
-        },
-        {
-          "name": "u_component_of_wind_10m_max",
-          "units": "m/s",
-          "min": 0,
-          "max": 0,
-          "description": "Daily maximum u_component_of_wind_10m value"
-        },
-        {
-          "name": "v_component_of_wind_10m_min",
-          "units": "m/s",
-          "min": 0,
-          "max": 0,
-          "description": "Daily minimum v_component_of_wind_10m value"
-        },
-        {
-          "name": "v_component_of_wind_10m_max",
-          "units": "m/s",
-          "min": 0,
-          "max": 0,
-          "description": "Daily maximum v_component_of_wind_10m value"
-        },
-        {
-          "name": "surface_pressure_min",
-          "units": "Pa",
-          "min": 0,
-          "max": 0,
-          "description": "Daily minimum surface_pressure value"
-        },
-        {
-          "name": "surface_pressure_max",
-          "units": "Pa",
-          "min": 0,
-          "max": 0,
-          "description": "Daily maximum surface_pressure value"
-        },
-        {
-          "name": "total_precipitation_min",
-          "units": "m",
-          "min": 0,
-          "max": 0,
-          "description": "Daily minimum total_precipitation value"
-        },
-        {
-          "name": "total_precipitation_max",
-          "units": "m",
-          "min": 0,
-          "max": 0,
-          "description": "Daily maximum total_precipitation value"
-        },
-        {
-          "name": "leaf_area_index_high_vegetation_min",
-          "units": "Area fraction",
-          "min": 0,
-          "max": 0,
-          "description": "Daily minimum leaf_area_index_high_vegetation value"
-        },
-        {
-          "name": "leaf_area_index_high_vegetation_max",
-          "units": "Area fraction",
-          "min": 0,
-          "max": 0,
-          "description": "Daily maximum leaf_area_index_high_vegetation value"
-        },
-        {
-          "name": "leaf_area_index_low_vegetation_min",
-          "units": "Area fraction",
-          "min": 0,
-          "max": 0,
-          "description": "Daily minimum leaf_area_index_low_vegetation value"
-        },
-        {
-          "name": "leaf_area_index_low_vegetation_max",
-          "units": "Area fraction",
-          "min": 0,
-          "max": 0,
-          "description": "Daily maximum leaf_area_index_low_vegetation value"
+          "description": "total precipitation disaggregated from the original cumulative values into hourly values"
         }
       ]
     },
