@@ -1,5 +1,5 @@
 """
-Map utility helpers for the GEE Data Extractor.
+Map utility helpers for SatLit.
 
 Provides reusable functions for creating Folium maps with consistent
 base layers, overlays, rendering via st_folium, and drag-to-resize.

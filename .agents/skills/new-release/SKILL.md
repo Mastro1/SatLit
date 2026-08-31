@@ -1,6 +1,6 @@
 ---
 name: release
-description: Step-by-step guide for shipping a new version of GEE Data Extractor UI. Use this skill whenever changes are ready to be released to users — it covers versioning, changelog, README review, and pushing to main.
+description: Step-by-step guide for shipping a new version of SatLit. Use this skill whenever changes are ready to be released to users — it covers versioning, changelog, README review, and pushing to main.
 ---
 
 # Release Skill

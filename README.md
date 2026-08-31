@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="assets/banner.png" width="600" alt="GEE Data Extractor Logo">
+  <img src="assets/banner.png" width="600" alt="SatLit Logo">
 </p>
 
-# 🌍 GEE Data Extractor UI — Google Earth Engine Satellite Data Extraction Tool
+# 🌍 SatLit — GEE Data Extraction Dashboard
 
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![Streamlit](https://img.shields.io/badge/Streamlit-FF4B4B?logo=Streamlit&logoColor=white)](https://streamlit.io/)
@@ -19,9 +19,11 @@ A **no-code Streamlit dashboard** for extracting historical satellite and climat
 
 ## 🚀 Overview
 
-![GEE Data Extractor UI Screenshot](assets/screenshot.png)
+![SatLit Screenshot](assets/screenshot.png)
 
-The **GEE Data Extractor UI** provides a complete end-to-end pipeline for acquiring environmental and satellite imagery data directly from Google Earth Engine — no manual coding required. Users can define their region of interest (ROI) visually, configure temporal filters, and submit high-volume extraction jobs to **Google Drive** or **local storage** in just a few clicks.
+The **SatLit** dashboard provides a complete end-to-end pipeline for acquiring environmental and satellite imagery data directly from Google Earth Engine — no manual coding required. Users can define their region of interest (ROI) visually, configure temporal filters, and submit high-volume extraction jobs to **Google Drive** or **local storage** in just a few clicks.
+
+**New in v0.4.0 — Project Rebranding to SatLit:** combining Satellite data with Streamlit, new branding assets, and updated desktop launcher.
 
 **New in v0.3.0 — Extraction Presets:** save a full extraction layout (dataset, bands, ROI, dates), reload it anytime, and share it with teammates as a portable JSON file or clipboard paste — without exposing credentials or local file paths.
 
@@ -44,7 +46,7 @@ This tool is especially useful for:
 - **Multiple Export Targets**: Export to **Google Drive** for large batch jobs or download results **locally** for quick samples.
 - **Extraction Presets**: Build a personal library of reusable extraction layouts. Open **Presets** in the sidebar to **Load**, **Save**, **Import**, or **Share** a setup. Teammates can exchange presets via JSON download or copy/paste — credentials and local shapefile paths are never included.
 - **Reproducibility & History**: Settings are persisted in `config/settings.toml`; full job history is tracked in `.cache/history.json` for instant parameter reloading. From Settings you can inspect cache size and clear all history or only entries older than a chosen age.
-- **Desktop Shortcut**: Create or recreate the GEE-UI desktop launcher anytime from Settings (in addition to the one-time first-run prompt).
+- **Desktop Shortcut**: Create or recreate the SatLit desktop launcher anytime from Settings (in addition to the one-time first-run prompt).
 - **GEE Task Monitor**: Refresh recent Earth Engine tasks in the sidebar, with a direct link to the [GEE Task Manager](https://code.earthengine.google.com/tasks).
 - **Live Map Verification**: Automated geometry and map rendering to visually confirm your ROI before submitting a job.
 - **Auto-Update**: On startup the app checks for a new version on GitHub. If one is available, a banner appears in the sidebar — one click pulls the latest changes and restarts the app in place.
@@ -92,8 +94,8 @@ That's it. To re-run setup at any time (e.g. after a manual `git pull`), run `py
 
 **1. Clone the Repository**
 ```bash
-git clone https://github.com/Mastro1/GEE_data_extraction_UI.git
-cd GEE_data_extraction_UI
+git clone https://github.com/Mastro1/SatLit.git
+cd SatLit
 ```
 
 **2. Run the installer**
@@ -194,7 +196,7 @@ To contribute:
 1. **Fork** the repository and create a new branch (`git checkout -b feature/my-feature`).
 2. **Make your changes** and ensure existing functionality is not broken.
 3. **Open a Pull Request** with a clear description of what you changed and why.
-4. **Report bugs** by opening a [GitHub Issue](https://github.com/Mastro1/GEE_data_extraction_UI/issues) with steps to reproduce.
+4. **Report bugs** by opening a [GitHub Issue](https://github.com/Mastro1/SatLit/issues) with steps to reproduce.
 
 ---
 

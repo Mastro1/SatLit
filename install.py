@@ -8,7 +8,7 @@ MIN_PYTHON = (3, 8)
 PROJECT_ROOT = Path(__file__).parent.resolve()
 VENV_DIR = PROJECT_ROOT / ".venv"
 REQUIREMENTS = PROJECT_ROOT / "requirements.txt"
-APP_NAME = "GEE-UI"
+APP_NAME = "SatLit"
 ICON_ICO = PROJECT_ROOT / "assets" / "favicon.ico"
 ICON_PNG = PROJECT_ROOT / "assets" / "favicon.png"
 
@@ -173,7 +173,7 @@ cd "{PROJECT_ROOT}"
     shortcut_path.write_text(script_content)
     shortcut_path.chmod(0o755)
     print(f"  Desktop launcher created: {shortcut_path}")
-    print("  Note: double-click the .command file to launch GEE-UI.")
+    print("  Note: double-click the .command file to launch SatLit.")
 
 
 def create_shortcut_linux(force: bool = False):
@@ -220,7 +220,7 @@ def main():
     from_runbat = "--from-runbat" in sys.argv
 
     print_banner()
-    print(f"=== GEE-UI Installer ===")
+    print(f"=== SatLit Installer ===")
     print(f"Project root: {PROJECT_ROOT}\n")
 
     check_python_version()

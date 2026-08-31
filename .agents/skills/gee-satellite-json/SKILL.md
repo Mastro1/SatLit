@@ -2,7 +2,7 @@
 name: gee-satellite-json
 description: >
   Generates a ready-to-paste JSON entry for a new satellite/dataset to add to the
-  GEE_data_extraction_UI satellites.json file (Mastro1/GEE_data_extraction_UI).
+  GEE_data_extraction_UI satellites.json file (Mastro1/SatLit).
   Use this skill whenever the user wants to add a new Google Earth Engine dataset,
   satellite, or climate product to satellites.json — even if they just paste a GEE
   catalog URL, a dataset name, or say things like "add a new satellite", "new dataset
@@ -14,7 +14,7 @@ description: >
 # GEE Satellite JSON Entry Creator
  
 Produces a single JSON object ready to paste into the `satellites` array of `satellites.json`
-for the [GEE_data_extraction_UI](https://github.com/Mastro1/GEE_data_extraction_UI) project.
+for the [SatLit](https://github.com/Mastro1/SatLit) project.
  
 ---
  
