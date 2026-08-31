@@ -1,5 +1,5 @@
 """
-Sidebar module for the GEE Data Extractor.
+Sidebar module for SatLit.
 Contains: Authentication status, Settings popup, Task monitor, Presets, History loader.
 """
 import sys

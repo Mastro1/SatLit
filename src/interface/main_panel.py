@@ -1,5 +1,5 @@
 """
-Main Panel module for the GEE Data Extractor.
+Main Panel module for SatLit.
 Contains the primary extraction pipeline UI with 4 sections:
 1. Data Source (WHAT) - Satellite and variable selection
 2. Region of Interest (WHERE) - Point/Shapefile/GADM selection
@@ -243,7 +243,7 @@ def apply_loaded_settings():
 
 def render(settings_service: SettingsService):
     """Renders the main panel with extraction pipeline."""
-    st.title("🛰️ GEE Data Extractor")
+    st.title("🛰️ SatLit")
     
     # Apply loaded settings if any
     apply_loaded_settings()
