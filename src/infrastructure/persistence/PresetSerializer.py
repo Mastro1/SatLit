@@ -9,6 +9,10 @@ from typing import Any
 PRESET_TYPE = "gee_extraction_preset"
 SUPPORTED_SCHEMA_VERSION = 1
 
+_NOT_A_PRESET = (
+    "That doesn't look like a preset. Export again from Presets → Share, or paste the full JSON."
+)
+
 CONFIG_KEYS = (
     "satellite",
     "bands",
@@ -175,24 +179,24 @@ def from_share_payload(raw: Any) -> dict:
         text = raw.strip()
         if not text:
             raise PresetValidationError(
-                "That doesn't look like a preset. Export again from Presets → Share, or paste the full JSON."
+                _NOT_A_PRESET
             )
         try:
             data = json.loads(text)
         except json.JSONDecodeError as exc:
             raise PresetValidationError(
-                "That doesn't look like a preset. Export again from Presets → Share, or paste the full JSON."
+                _NOT_A_PRESET
             ) from exc
     elif isinstance(raw, dict):
         data = raw
     else:
         raise PresetValidationError(
-            "That doesn't look like a preset. Export again from Presets → Share, or paste the full JSON."
+            _NOT_A_PRESET
         )
 
     if not isinstance(data, dict):
         raise PresetValidationError(
-            "That doesn't look like a preset. Export again from Presets → Share, or paste the full JSON."
+            _NOT_A_PRESET
         )
 
     name = data.get("name") or "Imported preset"
@@ -213,7 +217,7 @@ def from_share_payload(raw: Any) -> dict:
             )
         if data.get("type") not in (None, PRESET_TYPE) and "config" not in data:
             raise PresetValidationError(
-                "That doesn't look like a preset. Export again from Presets → Share, or paste the full JSON."
+                _NOT_A_PRESET
             )
         config_src = data.get("config")
         if not isinstance(config_src, dict):
@@ -222,7 +226,7 @@ def from_share_payload(raw: Any) -> dict:
                 warnings.append("Converted a history-style entry into a preset.")
             else:
                 raise PresetValidationError(
-                    "That doesn't look like a preset. Export again from Presets → Share, or paste the full JSON."
+                    _NOT_A_PRESET
                 )
         config = config_from_history_or_session(config_src)
     elif _looks_like_history_entry(data):
@@ -236,7 +240,7 @@ def from_share_payload(raw: Any) -> dict:
             name = f"{sat}_{start}_{end}".strip("_")
     else:
         raise PresetValidationError(
-            "That doesn't look like a preset. Export again from Presets → Share, or paste the full JSON."
+            _NOT_A_PRESET
         )
 
     if config.get("shapefile_required"):
@@ -252,9 +256,15 @@ def from_share_payload(raw: Any) -> dict:
     }
 
 
+def _sat_and_years(config: dict) -> tuple:
+    """Shared satellite + year extraction for preset naming and previews."""
+    dates = config.get("dates") or {}
+    return config.get("satellite") or "preset", dates.get("start_year"), dates.get("end_year")
+
+
 def preview_summary(name: str, config: dict) -> dict:
     """Compact fields for the import preview UI."""
-    dates = config.get("dates") or {}
+    sat, start, end = _sat_and_years(config)
     bands = config.get("bands") or []
     return {
         "name": name,
@@ -262,16 +272,13 @@ def preview_summary(name: str, config: dict) -> dict:
         "bands_count": len(bands),
         "bands": bands,
         "geometry_source": config.get("geometry_source"),
-        "date_range": f"{dates.get('start_year', '?')}–{dates.get('end_year', '?')}",
+        "date_range": f"{start or '?'}–{end or '?'}",
         "shapefile_required": bool(config.get("shapefile_required")),
     }
 
 
 def default_name_from_config(config: dict) -> str:
-    sat = config.get("satellite") or "preset"
-    dates = config.get("dates") or {}
-    start = dates.get("start_year")
-    end = dates.get("end_year")
+    sat, start, end = _sat_and_years(config)
     if start and end:
         return f"{sat}_{start}_{end}"
     return str(sat)
