@@ -20,7 +20,7 @@ from src.infrastructure.persistence.HistoryManager import HistoryManager
 from src.interface.map_utils import (
     create_base_map, add_geojson_overlay, add_markers, render_map,
     render_map_display, gdf_to_geojson, extract_gadm_display_columns,
-    fetch_gadm_boundaries,
+    fetch_gadm_boundaries, create_points_feature_group,
 )
 from src.infrastructure.utils.maps_url_parser import (
     parse_google_maps_url, is_google_maps_url,
@@ -412,6 +412,23 @@ def render_roi_section(loaded_settings: dict):
 def render_point_input(loaded_settings: dict):
     """Point coordinate input with multiple points support."""
     st.subheader("Point Selection")
+
+    # Pending recenter for off-screen adds only (imperative setView once)
+    if "pending_recenter" not in st.session_state:
+        st.session_state.pending_recenter = None
+
+    def _request_point_map_recenter(center, zoom=None):
+        # type: (list, object) -> None
+        z = zoom if zoom is not None else 5
+        try:
+            if int(z) <= 3:
+                z = 5
+        except Exception:
+            z = 5
+        st.session_state.pending_recenter = {
+            "center": [float(center[0]), float(center[1])],
+            "zoom": int(z),
+        }
     
     # Manual entry
     st.markdown("**Add point manually:**")
@@ -428,6 +445,7 @@ def render_point_input(loaded_settings: dict):
                 point = {'lat': lat, 'lon': lon}
                 if point not in st.session_state.selected_points:
                     st.session_state.selected_points.append(point)
+                    _request_point_map_recenter([lat, lon])
                     st.success(f"Added point ({lat}, {lon})")
                     st.rerun()
 
@@ -456,6 +474,7 @@ def render_point_input(loaded_settings: dict):
                     point = {'lat': lat, 'lon': lon}
                     if point not in st.session_state.selected_points:
                         st.session_state.selected_points.append(point)
+                        _request_point_map_recenter([lat, lon])
                         st.success(f"✅ Added point ({lat}, {lon})")
                         st.rerun()
                     else:
@@ -496,6 +515,10 @@ def render_point_input(loaded_settings: dict):
                     
                     if new_points:
                         st.session_state.selected_points.extend(new_points)
+                        # Recenter once to new points (avg center so all are near)
+                        _avg_lat = sum(p['lat'] for p in new_points) / len(new_points)
+                        _avg_lon = sum(p['lon'] for p in new_points) / len(new_points)
+                        _request_point_map_recenter([_avg_lat, _avg_lon])
                         st.success(f"✅ Added {len(new_points)} points from CSV!")
                         st.rerun()
                     else:
@@ -506,27 +529,52 @@ def render_point_input(loaded_settings: dict):
     
     # Interactive map for clicking
     st.markdown("**Or click on map to add points:**")
-    
-    # Create folium map
-    center = [0, 0]
-    if st.session_state.selected_points:
-        center = [st.session_state.selected_points[-1]['lat'], 
-                  st.session_state.selected_points[-1]['lon']]
-    
-    m = create_base_map(center=center, zoom=3)
 
-    # Add existing points to map
-    add_markers(m, st.session_state.selected_points, color='red')
+    # Stable base map — structurally identical every rerun so the
+    # st_folium component never remounts (view+tile stay client-side).
+    m = create_base_map(center=[0, 0], zoom=3)
 
-    map_data = render_map(m, key="point_map")
+    # Markers via feature_group_to_add so updates apply client-side
+    fg = create_points_feature_group(
+        st.session_state.selected_points, color='red'
+    )
+
+    # Pending recenter from off-screen adds only (manual/GMaps/CSV);
+    # click-adds never set it. Passed as imperative setView once then cleared.
+    pending = st.session_state.get("pending_recenter")
+    if pending and isinstance(pending, dict) and pending.get("center"):
+        _center = pending.get("center")
+        _zoom = pending.get("zoom")
+        map_data = render_map(
+            m,
+            key="point_map",
+            add_layer_control=True,
+            returned_objects=["last_clicked"],
+            feature_group_to_add=fg,
+            center=_center,
+            zoom=_zoom,
+        )
+        st.session_state.pending_recenter = None
+    else:
+        map_data = render_map(
+            m,
+            key="point_map",
+            add_layer_control=True,
+            returned_objects=["last_clicked"],
+            feature_group_to_add=fg,
+        )
     
-    # Handle map click
-    if map_data and map_data.get('last_clicked'):
+    # Handle map click - must NOT recenter (keep current viewport, user already looks at click)
+    if isinstance(map_data, dict) and map_data.get('last_clicked'):
         clicked = map_data['last_clicked']
-        new_point = {'lat': round(clicked['lat'], 6), 'lon': round(clicked['lng'], 6)}
-        if new_point not in st.session_state.selected_points:
-            st.session_state.selected_points.append(new_point)
-            st.rerun()
+        # st_folium uses lng for longitude
+        _clat = clicked.get('lat', clicked.get('y'))
+        _clng = clicked.get('lng', clicked.get('lon', clicked.get('x')))
+        if _clat is not None and _clng is not None:
+            new_point = {'lat': round(float(_clat), 6), 'lon': round(float(_clng), 6)}
+            if new_point not in st.session_state.selected_points:
+                st.session_state.selected_points.append(new_point)
+                st.rerun()
     
     # Display selected points with delete option
     if st.session_state.selected_points:
