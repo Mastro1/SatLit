@@ -349,6 +349,14 @@ def presets_dialog():
     presets = manager.list_presets()
     selected = None
 
+    # Deferred reset for the Load-section widget keys. Widget state may only
+    # be touched BEFORE its widget is created in a run, so handlers below
+    # set this flag + rerun instead of mutating the keys directly
+    # (same _pending_* pattern as the file-import path).
+    if st.session_state.pop("_reset_preset_select_ui", False):
+        st.session_state.pop("preset_dialog_select", None)
+        st.session_state["preset_confirm_delete"] = False
+
     with st.expander("Load", expanded=True):
         st.caption("Pick a saved preset and apply it to the form.")
         if presets:
@@ -390,13 +398,12 @@ def presets_dialog():
                     manager.delete(deleted_id)
                     if st.session_state.get("preset_selected_id") == deleted_id:
                         st.session_state.pop("preset_selected_id", None)
-                    st.session_state.pop("preset_dialog_select", None)
-                    st.session_state["preset_confirm_delete"] = False
+                    st.session_state["_reset_preset_select_ui"] = True
                     st.rerun()
         else:
             st.caption("No presets yet — open **Save** below to create one from the form.")
 
-    with st.expander("Save", expanded=True):
+    with st.expander("Save", expanded=False):
         st.caption("Store the current form as a reusable preset.")
         try:
             config = snapshot_config_from_session()
@@ -421,7 +428,7 @@ def presets_dialog():
                 try:
                     preset = manager.save_from_session_config(config, name=name, notes=notes)
                     st.session_state["preset_selected_id"] = preset.get("preset_id")
-                    st.session_state.pop("preset_dialog_select", None)
+                    st.session_state["_reset_preset_select_ui"] = True
                     st.success(f'Preset "{preset["name"]}" saved.')
                     st.rerun()
                 except PresetValidationError as exc:
@@ -539,7 +546,7 @@ def _render_import_preset(manager: PresetManager):
                 )
                 _clear_import_draft()
                 st.session_state["preset_selected_id"] = preset.get("preset_id")
-                st.session_state.pop("preset_dialog_select", None)
+                st.session_state["_reset_preset_select_ui"] = True
                 st.session_state["loaded_settings"] = dict(preset["config"])
                 st.success(
                     f'Preset "{preset["name"]}" is ready — check the form and run when you like.'
@@ -557,7 +564,7 @@ def _render_import_preset(manager: PresetManager):
                 )
                 _clear_import_draft()
                 st.session_state["preset_selected_id"] = preset.get("preset_id")
-                st.session_state.pop("preset_dialog_select", None)
+                st.session_state["_reset_preset_select_ui"] = True
                 st.success(f'Preset "{preset["name"]}" added to My Presets.')
                 st.rerun()
             except PresetValidationError as exc:

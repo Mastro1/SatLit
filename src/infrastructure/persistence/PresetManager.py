@@ -130,9 +130,6 @@ class PresetManager:
         self._save_presets()
         return True
 
-    def save_from_history_entry(self, entry: dict, name: str, notes: str = "") -> dict:
-        return self.add(name=name, config=entry, notes=notes)
-
     def save_from_session_config(self, config: dict, name: str, notes: str = "") -> dict:
         return self.add(name=name, config=config, notes=notes)
 

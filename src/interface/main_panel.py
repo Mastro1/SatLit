@@ -20,11 +20,23 @@ from src.infrastructure.persistence.HistoryManager import HistoryManager
 from src.interface.map_utils import (
     create_base_map, add_geojson_overlay, add_markers, render_map,
     render_map_display, gdf_to_geojson, extract_gadm_display_columns,
-    fetch_gadm_boundaries,
+    fetch_gadm_boundaries, create_points_feature_group,
 )
 from src.infrastructure.utils.maps_url_parser import (
     parse_google_maps_url, is_google_maps_url,
 )
+
+
+# Single source of truth for reducers: dropdown options come from here
+# (list(_REDUCERS)) and extraction resolves names through it.
+_REDUCERS = {
+    'mean': ee.Reducer.mean,
+    'sum': ee.Reducer.sum,
+    'max': ee.Reducer.max,
+    'min': ee.Reducer.min,
+    'median': ee.Reducer.median,
+    'first': ee.Reducer.first,
+}
 
 
 def load_satellites():
@@ -59,6 +71,22 @@ def update_default_filename():
 
 
 
+def active_geometry_source() -> str:
+    """Map the active roi_method radio tab to a geometry source name.
+
+    Single authority for which ROI tab owns extraction, snapshots, and
+    history: 'Points' (default when unset), 'Shapefile', or 'GADM'.
+    """
+    roi_method = str(st.session_state.get("roi_method", ""))
+    if "Point" in roi_method:
+        return "Points"
+    if "File" in roi_method:
+        return "Shapefile"
+    if "GADM" in roi_method:
+        return "GADM"
+    return "Points"
+
+
 def snapshot_config_from_session() -> dict:
     """Build a portable extraction config from the current form session state."""
     satellites = load_satellites()
@@ -66,15 +94,7 @@ def snapshot_config_from_session() -> dict:
     selected_satellite = next((s for s in satellites if s["name"] == sat_name), None)
     sat_id = selected_satellite["id"] if selected_satellite else None
 
-    roi_method = st.session_state.get("roi_method", "")
-    if "Point" in str(roi_method):
-        geometry_source = "Points"
-    elif "File" in str(roi_method):
-        geometry_source = "Shapefile"
-    elif "GADM" in str(roi_method):
-        geometry_source = "GADM"
-    else:
-        geometry_source = "Points"
+    geometry_source = active_geometry_source()
 
     export_method_ui = st.session_state.get("export_method", "")
     if "Drive" in str(export_method_ui):
@@ -98,19 +118,40 @@ def snapshot_config_from_session() -> dict:
         "use_season": st.session_state.get("use_season_interactive", st.session_state.get("use_season", False)),
     }
 
-    selected_points = st.session_state.get("selected_points") or []
-    uploaded = st.session_state.get("uploaded_shapefile")
+    bands = st.session_state.get("selected_bands") or st.session_state.get("band_multiselect") or []
+    # Reducers are scoped to the currently selected bands only, so reducers
+    # remembered from a previously viewed dataset never leak into presets.
+    reducers = {
+        band: reducer
+        for band, reducer in (st.session_state.get("band_selections") or {}).items()
+        if band in bands
+    }
+
+    # Only the active ROI source's data enters the snapshot; data parked in
+    # inactive tabs stays in session state but is ignored here.
+    if geometry_source == "Points":
+        snap_points = st.session_state.get("selected_points") or []
+        snap_gadm, snap_regions, snap_shapefile = {}, None, None
+    elif geometry_source == "GADM":
+        snap_points = []
+        snap_gadm = gadm_selection
+        snap_regions = st.session_state.get("gadm_regions")
+        snap_shapefile = None
+    else:  # Shapefile
+        snap_points = []
+        snap_gadm, snap_regions = {}, None
+        snap_shapefile = st.session_state.get("uploaded_shapefile")
 
     return {
         "satellite": sat_id,
-        "bands": st.session_state.get("selected_bands") or st.session_state.get("band_multiselect") or [],
-        "reducers": dict(st.session_state.get("band_selections") or {}),
+        "bands": bands,
+        "reducers": reducers,
         "geometry_source": geometry_source,
-        "num_points": len(selected_points),
-        "selected_points": selected_points,
-        "gadm_selection": gadm_selection,
-        "gadm_regions": st.session_state.get("gadm_regions"),
-        "uploaded_shapefile": uploaded,
+        "num_points": len(snap_points),
+        "selected_points": snap_points,
+        "gadm_selection": snap_gadm,
+        "gadm_regions": snap_regions,
+        "uploaded_shapefile": snap_shapefile,
         "dates": dates,
         "export_method": export_method,
         "output_format": "CSV",
@@ -305,11 +346,15 @@ def render_data_source_section(satellites: list, loaded_settings: dict):
                 default_idx = i
                 break
     
-    # Satellite selector
+    # Satellite selector. When session state already holds a (loaded or
+    # user-picked) value it drives the widget, so index must be omitted —
+    # passing both triggers a Streamlit warning and the default is ignored.
+    if st.session_state.get("satellite_selector") not in satellite_names:
+        st.session_state.pop("satellite_selector", None)
     selected_sat_name = st.selectbox(
         "Select Satellite/Dataset",
         options=satellite_names,
-        index=default_idx,
+        **({} if "satellite_selector" in st.session_state else {"index": default_idx}),
         key="satellite_selector",
         on_change=update_default_filename
     )
@@ -343,13 +388,25 @@ def render_data_source_section(satellites: list, loaded_settings: dict):
         # Default bands from loaded settings
         default_bands = loaded_settings.get('bands', [])
         default_selections = [b for b in band_names if b in default_bands] or band_names[:1]
-        
-        selected_bands = st.multiselect(
-            "Select bands to extract",
-            options=band_names,
-            default=default_selections if any(b in band_names for b in default_selections) else [],
-            key="band_multiselect"
-        )
+        _ms_default = default_selections if any(b in band_names for b in default_selections) else []
+
+        # Session state drives when it holds valid bands; otherwise default
+        # applies. Stale bands from another dataset fall back to default.
+        _ms_session = st.session_state.get("band_multiselect") or []
+        if _ms_session and all(b in band_names for b in _ms_session):
+            selected_bands = st.multiselect(
+                "Select bands to extract",
+                options=band_names,
+                key="band_multiselect"
+            )
+        else:
+            st.session_state.pop("band_multiselect", None)
+            selected_bands = st.multiselect(
+                "Select bands to extract",
+                options=band_names,
+                default=_ms_default,
+                key="band_multiselect"
+            )
         
         # For each selected band, show reducer option
         if selected_bands:
@@ -358,7 +415,7 @@ def render_data_source_section(satellites: list, loaded_settings: dict):
                 "The reducer defines how those pixel values are aggregated — e.g. &quot;mean&quot; averages all "
                 "pixel values within the shape, &quot;max&quot; takes the highest value, etc."
             )
-            reducers = ['mean', 'sum', 'max', 'min', 'median', 'first']
+            reducers = list(_REDUCERS)
             
             for band_name in selected_bands:
                 col1, col2 = st.columns([2, 1])
@@ -369,11 +426,12 @@ def render_data_source_section(satellites: list, loaded_settings: dict):
                     desc = band_info.get('description', '')
                     st.caption(f"**{band_name}** ({units}) - {desc[:50]}...")
                 with col2:
+                    _red_key = f"reducer_{band_name}"
                     reducer = st.selectbox(
                         f"Reducer",
                         options=reducers,
-                        index=0,
-                        key=f"reducer_{band_name}",
+                        **({} if _red_key in st.session_state else {"index": 0}),
+                        key=_red_key,
                         label_visibility="collapsed"
                     )
                     st.session_state.band_selections[band_name] = reducer
@@ -412,6 +470,23 @@ def render_roi_section(loaded_settings: dict):
 def render_point_input(loaded_settings: dict):
     """Point coordinate input with multiple points support."""
     st.subheader("Point Selection")
+
+    # Pending recenter for off-screen adds only (imperative setView once)
+    if "pending_recenter" not in st.session_state:
+        st.session_state.pending_recenter = None
+
+    def _request_point_map_recenter(center, zoom=None):
+        # type: (list, object) -> None
+        z = zoom if zoom is not None else 5
+        try:
+            if int(z) <= 3:
+                z = 5
+        except Exception:
+            z = 5
+        st.session_state.pending_recenter = {
+            "center": [float(center[0]), float(center[1])],
+            "zoom": int(z),
+        }
     
     # Manual entry
     st.markdown("**Add point manually:**")
@@ -428,6 +503,7 @@ def render_point_input(loaded_settings: dict):
                 point = {'lat': lat, 'lon': lon}
                 if point not in st.session_state.selected_points:
                     st.session_state.selected_points.append(point)
+                    _request_point_map_recenter([lat, lon])
                     st.success(f"Added point ({lat}, {lon})")
                     st.rerun()
 
@@ -456,6 +532,7 @@ def render_point_input(loaded_settings: dict):
                     point = {'lat': lat, 'lon': lon}
                     if point not in st.session_state.selected_points:
                         st.session_state.selected_points.append(point)
+                        _request_point_map_recenter([lat, lon])
                         st.success(f"✅ Added point ({lat}, {lon})")
                         st.rerun()
                     else:
@@ -496,6 +573,10 @@ def render_point_input(loaded_settings: dict):
                     
                     if new_points:
                         st.session_state.selected_points.extend(new_points)
+                        # Recenter once to new points (avg center so all are near)
+                        _avg_lat = sum(p['lat'] for p in new_points) / len(new_points)
+                        _avg_lon = sum(p['lon'] for p in new_points) / len(new_points)
+                        _request_point_map_recenter([_avg_lat, _avg_lon])
                         st.success(f"✅ Added {len(new_points)} points from CSV!")
                         st.rerun()
                     else:
@@ -506,27 +587,52 @@ def render_point_input(loaded_settings: dict):
     
     # Interactive map for clicking
     st.markdown("**Or click on map to add points:**")
-    
-    # Create folium map
-    center = [0, 0]
-    if st.session_state.selected_points:
-        center = [st.session_state.selected_points[-1]['lat'], 
-                  st.session_state.selected_points[-1]['lon']]
-    
-    m = create_base_map(center=center, zoom=3)
 
-    # Add existing points to map
-    add_markers(m, st.session_state.selected_points, color='red')
+    # Stable base map — structurally identical every rerun so the
+    # st_folium component never remounts (view+tile stay client-side).
+    m = create_base_map(center=[0, 0], zoom=3)
 
-    map_data = render_map(m, key="point_map")
+    # Markers via feature_group_to_add so updates apply client-side
+    fg = create_points_feature_group(
+        st.session_state.selected_points, color='red'
+    )
+
+    # Pending recenter from off-screen adds only (manual/GMaps/CSV);
+    # click-adds never set it. Passed as imperative setView once then cleared.
+    pending = st.session_state.get("pending_recenter")
+    if pending and isinstance(pending, dict) and pending.get("center"):
+        _center = pending.get("center")
+        _zoom = pending.get("zoom")
+        map_data = render_map(
+            m,
+            key="point_map",
+            add_layer_control=True,
+            returned_objects=["last_clicked"],
+            feature_group_to_add=fg,
+            center=_center,
+            zoom=_zoom,
+        )
+        st.session_state.pending_recenter = None
+    else:
+        map_data = render_map(
+            m,
+            key="point_map",
+            add_layer_control=True,
+            returned_objects=["last_clicked"],
+            feature_group_to_add=fg,
+        )
     
-    # Handle map click
-    if map_data and map_data.get('last_clicked'):
+    # Handle map click - must NOT recenter (keep current viewport, user already looks at click)
+    if isinstance(map_data, dict) and map_data.get('last_clicked'):
         clicked = map_data['last_clicked']
-        new_point = {'lat': round(clicked['lat'], 6), 'lon': round(clicked['lng'], 6)}
-        if new_point not in st.session_state.selected_points:
-            st.session_state.selected_points.append(new_point)
-            st.rerun()
+        # st_folium uses lng for longitude
+        _clat = clicked.get('lat', clicked.get('y'))
+        _clng = clicked.get('lng', clicked.get('lon', clicked.get('x')))
+        if _clat is not None and _clng is not None:
+            new_point = {'lat': round(float(_clat), 6), 'lon': round(float(_clng), 6)}
+            if new_point not in st.session_state.selected_points:
+                st.session_state.selected_points.append(new_point)
+                st.rerun()
     
     # Display selected points with delete option
     if st.session_state.selected_points:
@@ -883,9 +989,11 @@ def render_time_section(loaded_settings: dict):
     if current_end < current_start:
         st.error(f"⚠️ **Invalid Date Range**: End Year ({current_end}) is before Start Year ({current_start}).")
 
-    # Seasonality filter - OUTSIDE form to allow instant UI update
-    use_season = st.checkbox("🌾 Filter by Season (Day of Year)", 
-                             value=st.session_state.get('use_season', loaded_settings.get('dates', {}).get('use_season', False)),
+    # Seasonality filter - OUTSIDE form to allow instant UI update.
+    # Session state drives when present; value only seeds a fresh widget.
+    _use_season_default = st.session_state.get('use_season', loaded_settings.get('dates', {}).get('use_season', False))
+    use_season = st.checkbox("🌾 Filter by Season (Day of Year)",
+                             **({} if "use_season_interactive" in st.session_state else {"value": _use_season_default}),
                              key="use_season_interactive")
     
     # Sync use_season to session state immediately
@@ -893,22 +1001,36 @@ def render_time_section(loaded_settings: dict):
 
     with st.form("time_definition_form"):
         col1, col2 = st.columns(2)
-        
+
+        # Year/DOY widgets: session state drives when present (e.g. after
+        # loading history), so value is only passed on first creation.
+        # Out-of-range parked values (e.g. older than a newly selected
+        # satellite) are dropped so the default below applies.
+        _start_default = max(loaded_settings.get('dates', {}).get('start_year', 2020), sat_min_year)
+        _end_default = max(loaded_settings.get('dates', {}).get('end_year', datetime.now().year), sat_min_year)
+        for _k, _lo, _hi in (("form_start_year", sat_min_year, datetime.now().year),
+                             ("form_end_year", sat_min_year, datetime.now().year),
+                             ("form_start_doy", 1, 365),
+                             ("form_end_doy", 1, 365)):
+            _v = st.session_state.get(_k)
+            if _v is not None and not (_lo <= _v <= _hi):
+                st.session_state.pop(_k, None)
+
         with col1:
             start_year = st.number_input(
                 "Start Year",
                 min_value=sat_min_year,
                 max_value=datetime.now().year,
-                value=max(loaded_settings.get('dates', {}).get('start_year', 2020), sat_min_year),
+                **({} if "form_start_year" in st.session_state else {"value": _start_default}),
                 key="form_start_year"
             )
-        
+
         with col2:
             end_year = st.number_input(
                 "End Year",
                 min_value=sat_min_year,
                 max_value=datetime.now().year,
-                value=max(loaded_settings.get('dates', {}).get('end_year', datetime.now().year), sat_min_year),
+                **({} if "form_end_year" in st.session_state else {"value": _end_default}),
                 key="form_end_year"
             )
         
@@ -922,7 +1044,7 @@ def render_time_section(loaded_settings: dict):
                     "Start DOY",
                     min_value=1,
                     max_value=365,
-                    value=st.session_state.get('start_doy', loaded_settings.get('dates', {}).get('start_doy', 1)),
+                    **({} if "form_start_doy" in st.session_state else {"value": st.session_state.get('start_doy', loaded_settings.get('dates', {}).get('start_doy', 1))}),
                     key="form_start_doy"
                 )
             with col2:
@@ -930,7 +1052,7 @@ def render_time_section(loaded_settings: dict):
                     "End DOY",
                     min_value=1,
                     max_value=365,
-                    value=st.session_state.get('end_doy', loaded_settings.get('dates', {}).get('end_doy', 365)),
+                    **({} if "form_end_doy" in st.session_state else {"value": st.session_state.get('end_doy', loaded_settings.get('dates', {}).get('end_doy', 365))}),
                     key="form_end_doy"
                 )
             
@@ -986,10 +1108,12 @@ def render_execution_section(settings_service: SettingsService, satellites: list
         key="export_method"
     )
     
-    # Drive folder configuration
+    # Drive folder configuration (session drives when present, else settings default)
     if "Drive" in export_method:
         drive_folder = settings_service.get_setting("gee", "drive_folder", "GEE_Exports")
-        drive_folder = st.text_input("Drive Folder Name", value=drive_folder, key="drive_folder")
+        drive_folder = st.text_input("Drive Folder Name",
+                                     **({} if "drive_folder" in st.session_state else {"value": drive_folder}),
+                                     key="drive_folder")
     
     # Filename / Task Name
     selected_satellite = st.session_state.get('selected_satellite')
@@ -1001,8 +1125,8 @@ def render_execution_section(settings_service: SettingsService, satellites: list
     default_filename = f"{sat_id}_{year_str}_timeseries"
     
     custom_filename = st.text_input(
-        "File Name / Task Name", 
-        value=default_filename, 
+        "File Name / Task Name",
+        **({} if "custom_filename" in st.session_state else {"value": default_filename}),
         help="The name used for the GEE task and the output file",
         key="custom_filename"
     )
@@ -1033,8 +1157,19 @@ def run_extraction(settings_service: SettingsService, export_method: str):
                 st.error("Please select at least one band")
                 return
             
-            if not selected_points and not st.session_state.get('uploaded_shapefile') and not st.session_state.get('gadm_selection'):
-                st.error("Please define a region of interest (point, shapefile, or GADM)")
+            # ROI authority: only the active roi_method tab is validated and
+            # extracted; stale data parked in inactive tabs never qualifies.
+            geometry_source = active_geometry_source()
+            if geometry_source == 'Points':
+                if not selected_points:
+                    st.error("Please add at least one point under 📍 Point Coordinates before extracting.")
+                    return
+            elif geometry_source == 'Shapefile':
+                if not st.session_state.get('uploaded_shapefile'):
+                    st.error("Please import a geometry file under 📁 File Import before extracting.")
+                    return
+            elif not st.session_state.get('gadm_selection'):
+                st.error("Please select a region under 🗺️ GADM Admin before extracting.")
                 return
             
             # Initialize GEE if needed
@@ -1086,22 +1221,16 @@ def run_extraction(settings_service: SettingsService, export_method: str):
             # Build the reducer based on band selections
             # We'll use the same reducer for all bands (most common case)
             # or combine multiple reducers
-            reducer_name = list(band_selections.values())[0] if band_selections else 'mean'
-            
-            if reducer_name == 'mean':
-                reducer = ee.Reducer.mean()
-            elif reducer_name == 'sum':
-                reducer = ee.Reducer.sum()
-            elif reducer_name == 'max':
-                reducer = ee.Reducer.max()
-            elif reducer_name == 'min':
-                reducer = ee.Reducer.min()
-            elif reducer_name == 'median':
-                reducer = ee.Reducer.median()
-            elif reducer_name == 'first':
-                reducer = ee.Reducer.first()
-            else:
-                reducer = ee.Reducer.mean()
+            # NOTE: resolve through selected_bands in order, not raw dict order:
+            # band_selections accumulates entries from previously viewed
+            # datasets, so values()[0] could be a stale band's reducer.
+            reducer_name = next(
+                (band_selections[b] for b in selected_bands if b in band_selections),
+                'mean',
+            )
+
+            # Unknown names fall back to mean (same as before).
+            reducer = _REDUCERS.get(reducer_name, ee.Reducer.mean)()
             
             # Detect whether the selected dataset has sub-daily (hourly) cadence
             is_hourly = selected_satellite.get('isHourly', False)
@@ -1166,21 +1295,27 @@ def run_extraction(settings_service: SettingsService, export_method: str):
                 _time_cols.append('time')
             _time_cols += ['year', 'month', 'day', 'doy']
 
-            _spatial_cols = []
-            _imported = st.session_state.get('imported_geodata')
-            if selected_points:
+            # Column order follows the active ROI source only, so stale data
+            # from inactive tabs cannot change the output CSV schema.
+            if geometry_source == 'Points':
                 _spatial_cols = ['point_id', 'latitude', 'longitude']
-            elif _imported and _imported.get('type') == 'points':
-                _spatial_cols = ['point_id', 'latitude', 'longitude']
-            elif st.session_state.get('gadm_selection') and 'gdf' in st.session_state.get('gadm_selection', {}):
-                _gadm_gdf = st.session_state['gadm_selection']['gdf']
-                _gadm_name_gid = [c for c in _gadm_gdf.columns
-                                   if c.startswith(('GID_', 'NAME_'))]
-                _spatial_cols = ['feature_id', 'country', 'admin_level', 'source'] + _gadm_name_gid
-            elif _imported and _imported.get('type') == 'shapes':
-                _spatial_cols = ['feature_id', 'source']
-            else:
-                _spatial_cols = ['source']
+            elif geometry_source == 'GADM':
+                _gadm_sel = st.session_state.get('gadm_selection') or {}
+                if 'gdf' in _gadm_sel:
+                    _gadm_gdf = _gadm_sel['gdf']
+                    _gadm_name_gid = [c for c in _gadm_gdf.columns
+                                       if c.startswith(('GID_', 'NAME_'))]
+                    _spatial_cols = ['feature_id', 'country', 'admin_level', 'source'] + _gadm_name_gid
+                else:
+                    _spatial_cols = ['source']
+            else:  # Shapefile
+                _imported = st.session_state.get('imported_geodata')
+                if _imported and _imported.get('type') == 'points':
+                    _spatial_cols = ['point_id', 'latitude', 'longitude']
+                elif _imported and _imported.get('type') == 'shapes':
+                    _spatial_cols = ['feature_id', 'source']
+                else:
+                    _spatial_cols = ['source']
 
             ordered_columns = (
                 ['system:index'] + _time_cols + _spatial_cols
@@ -1213,20 +1348,25 @@ def run_extraction(settings_service: SettingsService, export_method: str):
                 st.info(f"**Output:** CSV file in Google Drive folder `{drive_folder}`")
                 st.markdown(f"📊 [View in GEE Console](https://code.earthengine.google.com/tasks)")
                 
-                # Save to history
-                # Save to history
+                # Save to history — only the active ROI source's fields are
+                # populated; inactive sources are stored empty (all history/
+                # preset readers use .get, so empty inactive fields are safe).
                 history_manager = HistoryManager()
+                is_points_roi = geometry_source == 'Points'
+                is_gadm_roi = geometry_source == 'GADM'
                 history_entry = {
                     'satellite': selected_satellite['id'],
                     'bands': selected_bands,
-                    'reducers': band_selections,
-                    'geometry_source': 'Points' if selected_points else ('Shapefile' if st.session_state.get('uploaded_shapefile') else 'GADM'),
-                    'num_points': len(selected_points) if selected_points else 0,
-                    'selected_points': selected_points,  # Save full points list
-                    'selected_points': selected_points,  # Save full points list
-                    'gadm_selection': {k: v for k, v in st.session_state.get('gadm_selection', {}).items() if k != 'gdf'}, # Save GADM details without GDF
-                    'gadm_regions': st.session_state.get('gadm_regions'), # Save specific regions if any
-                    'uploaded_shapefile': st.session_state.get('uploaded_shapefile'), # Save shapefile path
+                    'reducers': {b: r for b, r in band_selections.items() if b in selected_bands},
+                    'geometry_source': geometry_source,
+                    'num_points': len(selected_points) if is_points_roi else 0,
+                    'selected_points': selected_points if is_points_roi else [],  # Save full points list
+                    'gadm_selection': (
+                        {k: v for k, v in st.session_state.get('gadm_selection', {}).items() if k != 'gdf'}  # without GDF
+                        if is_gadm_roi else {}
+                    ),
+                    'gadm_regions': st.session_state.get('gadm_regions') if is_gadm_roi else None,  # Specific regions if any
+                    'uploaded_shapefile': st.session_state.get('uploaded_shapefile') if geometry_source == 'Shapefile' else None,  # Save shapefile path
                     'dates': date_config,
                     'export_method': 'Drive',
                     'output_format': 'CSV',
@@ -1292,10 +1432,17 @@ def run_extraction(settings_service: SettingsService, export_method: str):
 def build_geometry_and_features():
     """Build ee.Geometry and ee.FeatureCollection from session state inputs."""
     geometry_service = GeometryService()
-    
-    # Check for manual points
-    points = st.session_state.get('selected_points', [])
-    if points:
+
+    # ROI authority: build ONLY from the active roi_method tab. Data parked
+    # in inactive tabs stays in session state but is ignored here.
+    source = active_geometry_source()
+
+    if source == 'Points':
+        # Manual points from the Point Coordinates tab only
+        points = st.session_state.get('selected_points', [])
+        if not points:
+            return None, None
+
         # Create features with point IDs
         features = []
         for i, p in enumerate(points):
@@ -1316,84 +1463,87 @@ def build_geometry_and_features():
             geometry = ee.Geometry.MultiPoint(coords)
         
         return geometry, feature_collection
-    
-    # Check for imported file (lazy: reads file on-demand, not from session state)
-    imported = st.session_state.get('imported_geodata')
-    import_path = st.session_state.get('uploaded_shapefile')
-    if imported and import_path:
-        geo_type = imported['type']
-        
-        # Load file on-demand with simplification for shapes
-        simplify = 0.01 if geo_type == 'shapes' else 0.0
-        gdf = geometry_service.load_file(import_path, simplify_tolerance=simplify)
-        
-        # Determine which column to use as feature identifier
-        id_col = st.session_state.get('feature_id_column', '(auto index)')
-        use_column = id_col != '(auto index)' and id_col in gdf.columns
-        
-        if geo_type == 'points':
-            # Treat as individual points (like manual point entry)
-            features = []
-            point_id = 1
-            for _, row in gdf.iterrows():
-                geom = row.geometry
-                if geom.geom_type == 'MultiPoint':
-                    for sub_pt in geom.geoms:
+
+    if source == 'Shapefile':
+        # Imported file only (lazy: reads file on-demand, not from session state)
+        imported = st.session_state.get('imported_geodata')
+        import_path = st.session_state.get('uploaded_shapefile')
+        if imported and import_path:
+            geo_type = imported['type']
+
+            # Load file on-demand with simplification for shapes
+            simplify = 0.01 if geo_type == 'shapes' else 0.0
+            gdf = geometry_service.load_file(import_path, simplify_tolerance=simplify)
+
+            # Determine which column to use as feature identifier
+            id_col = st.session_state.get('feature_id_column', '(auto index)')
+            use_column = id_col != '(auto index)' and id_col in gdf.columns
+
+            if geo_type == 'points':
+                # Treat as individual points (like manual point entry)
+                features = []
+                point_id = 1
+                for _, row in gdf.iterrows():
+                    geom = row.geometry
+                    if geom.geom_type == 'MultiPoint':
+                        for sub_pt in geom.geoms:
+                            props = {
+                                'point_id': row[id_col] if use_column else point_id,
+                                'latitude': sub_pt.y,
+                                'longitude': sub_pt.x
+                            }
+                            feature = ee.Feature(
+                                ee.Geometry.Point([sub_pt.x, sub_pt.y]), props
+                            )
+                            features.append(feature)
+                            point_id += 1
+                    else:
                         props = {
                             'point_id': row[id_col] if use_column else point_id,
-                            'latitude': sub_pt.y,
-                            'longitude': sub_pt.x
+                            'latitude': geom.y,
+                            'longitude': geom.x
                         }
                         feature = ee.Feature(
-                            ee.Geometry.Point([sub_pt.x, sub_pt.y]), props
+                            ee.Geometry.Point([geom.x, geom.y]), props
                         )
                         features.append(feature)
                         point_id += 1
-                else:
-                    props = {
-                        'point_id': row[id_col] if use_column else point_id,
-                        'latitude': geom.y,
-                        'longitude': geom.x
-                    }
-                    feature = ee.Feature(
-                        ee.Geometry.Point([geom.x, geom.y]), props
-                    )
+
+                feature_collection = ee.FeatureCollection(features)
+                geometry = feature_collection.geometry()
+                return geometry, feature_collection
+
+            else:
+                # Treat as shapes (polygons / lines) — already simplified
+                features = []
+                for idx, row in enumerate(gdf.itertuples()):
+                    geom_dict = row.geometry.__geo_interface__
+                    ee_geom = ee.Geometry(geom_dict)
+                    # Use selected column value or numeric index as feature_id
+                    if use_column:
+                        fid = getattr(row, id_col, idx + 1)
+                    else:
+                        fid = idx + 1
+                    feature = ee.Feature(ee_geom, {
+                        'feature_id': fid,
+                        'source': 'shapefile'
+                    })
                     features.append(feature)
-                    point_id += 1
-            
-            feature_collection = ee.FeatureCollection(features)
-            geometry = feature_collection.geometry()
+
+                feature_collection = ee.FeatureCollection(features)
+                geometry = feature_collection.geometry()
+                return geometry, feature_collection
+
+        # Legacy fallback: shapefile path without parsed geodata
+        shapefile_path = st.session_state.get('uploaded_shapefile')
+        if shapefile_path and not imported:
+            geometry = geometry_service.parse_geometry(shapefile_path, 'shapefile')
+            feature_collection = ee.FeatureCollection([ee.Feature(geometry, {'source': 'shapefile'})])
             return geometry, feature_collection
-        
-        else:
-            # Treat as shapes (polygons / lines) — already simplified
-            features = []
-            for idx, row in enumerate(gdf.itertuples()):
-                geom_dict = row.geometry.__geo_interface__
-                ee_geom = ee.Geometry(geom_dict)
-                # Use selected column value or numeric index as feature_id
-                if use_column:
-                    fid = getattr(row, id_col, idx + 1)
-                else:
-                    fid = idx + 1
-                feature = ee.Feature(ee_geom, {
-                    'feature_id': fid,
-                    'source': 'shapefile'
-                })
-                features.append(feature)
-            
-            feature_collection = ee.FeatureCollection(features)
-            geometry = feature_collection.geometry()
-            return geometry, feature_collection
-    
-    # Legacy fallback: Check for shapefile path without parsed geodata
-    shapefile_path = st.session_state.get('uploaded_shapefile')
-    if shapefile_path and not imported:
-        geometry = geometry_service.parse_geometry(shapefile_path, 'shapefile')
-        feature_collection = ee.FeatureCollection([ee.Feature(geometry, {'source': 'shapefile'})])
-        return geometry, feature_collection
-    
-    # Check for GADM
+
+        return None, None
+
+    # GADM tab only
     gadm_selection = st.session_state.get('gadm_selection')
     if gadm_selection and 'gdf' in gadm_selection:
         # Use the cached GeoDataFrame
