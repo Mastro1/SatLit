@@ -15,8 +15,6 @@ import argparse
 import json
 import math
 import sys
-import tomllib
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import ee
@@ -27,37 +25,12 @@ sys.path.insert(0, str(ROOT))
 
 from src.infrastructure.utils.grid_utils import generate_pixel_grid_geojson
 
-SETTINGS = ROOT / "config" / "settings.toml"
-CATALOG = ROOT / "config" / "satellites.json"
+# probe_projection (same scripts/ dir, auto on sys.path when run as __main__)
+# owns the shared GEE helpers — single load_project, single load_gated.
+from probe_projection import CATALOG, first_image, live_projection, load_gated, load_project
+
 EPS = 1e-6
 MARGIN = 1e-4  # deg; ROI half-width, keeps the ROI strictly inside one cell
-
-
-def load_project(override=None):
-    """GEE project id: --project wins, else config/settings.toml [gee] project_id."""
-    if override:
-        return override
-    with open(SETTINGS, "rb") as fh:
-        project = tomllib.load(fh).get("gee", {}).get("project_id")
-    if not project:
-        raise SystemExit(
-            f"missing/empty key 'project_id' in {SETTINGS} under [gee] — "
-            "set it there or pass --project"
-        )
-    return project
-
-
-def load_gated_ids():
-    """Gated dataset ids = catalog satellites with BOTH truthy crs and a
-    6-number transform — same rule as probe_projection.load_gated."""
-    return [
-        sat["id"]
-        for sat in json.loads(CATALOG.read_text(encoding="utf-8"))["satellites"]
-        if sat.get("crs")
-        and isinstance(sat.get("transform"), list)
-        and len(sat["transform"]) == 6
-        and all(isinstance(v, (int, float)) for v in sat["transform"])
-    ]
 
 
 def load_entry(dataset):
@@ -65,24 +38,6 @@ def load_entry(dataset):
         if sat["id"] == dataset:
             return sat
     raise SystemExit(f"dataset '{dataset}' not found in config/satellites.json")
-
-
-def first_image(collection_id):
-    info = ee.ImageCollection(collection_id).first().getInfo()
-    ms = info["properties"]["system:time_start"]
-    # epoch arithmetic, not fromtimestamp: pre-1970 epochs raise OSError on Windows
-    date = (datetime(1970, 1, 1, tzinfo=timezone.utc) + timedelta(milliseconds=ms)).strftime("%Y-%m-%d")
-    return info["id"], date
-
-
-def live_projection(image_id):
-    try:
-        return ee.Image(image_id).projection().getInfo(), "image"
-    except ee.ee_exception.EEException as exc:
-        if "different projections" not in str(exc):
-            raise
-        proj = ee.Image(image_id).select(0).projection().getInfo()
-        return proj, "band 0 (image has mixed band projections)"
 
 
 def cell_corners(lon, lat, transform):
@@ -116,7 +71,7 @@ def overlay_corners(lon, lat, crs, transform):
 
 def main():
     ap = argparse.ArgumentParser(description="Verify shipped pixel-grid metadata matches live GEE.")
-    ap.add_argument("--dataset", required=True, choices=load_gated_ids())
+    ap.add_argument("--dataset", required=True, choices=list(load_gated()))
     ap.add_argument("--project", default=None,
                     help="GEE project id (default: config/settings.toml [gee] project_id)")
     ap.add_argument("--lon", type=float, required=True)

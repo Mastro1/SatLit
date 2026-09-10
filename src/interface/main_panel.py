@@ -69,6 +69,22 @@ def active_satellite_supports_grid(satellite=None):
     )
 
 
+def _maybe_add_pixel_grid(m, gdf):
+    """Viz-only pixel-grid overlay on a preview map. Silent skip on None,
+    toast on too_many_pixels; never breaks the ROI preview."""
+    try:
+        sat = st.session_state.selected_satellite
+        grid = generate_pixel_grid_geojson(gdf.geometry.unary_union, sat['crs'], sat['transform'])
+        if grid is None:
+            pass
+        elif grid.get("properties", {}).get("error") == "too_many_pixels":
+            st.toast(grid["properties"]["message"])
+        else:
+            add_pixel_grid_overlay(m, grid)
+    except Exception as grid_err:
+        st.toast(f"Pixel grid unavailable: {str(grid_err)[:100]}")
+
+
 def update_default_filename():
     """Update the custom filename in session state based on current selections."""
     # Get current satellite ID
@@ -829,17 +845,7 @@ def render_shapefile_input():
                         add_geojson_overlay(m, geojson_data)
 
                     if show_grid_import:
-                        try:
-                            sat = st.session_state.selected_satellite
-                            grid = generate_pixel_grid_geojson(gdf.geometry.unary_union, sat['crs'], sat['transform'])
-                            if grid is None:
-                                pass
-                            elif grid.get("properties", {}).get("error") == "too_many_pixels":
-                                st.toast(grid["properties"]["message"])
-                            else:
-                                add_pixel_grid_overlay(m, grid)
-                        except Exception as grid_err:
-                            st.toast(f"Pixel grid unavailable: {str(grid_err)[:100]}")
+                        _maybe_add_pixel_grid(m, gdf)
 
                     render_map_display(m, key="import_preview_map", fit_bounds=gdf.total_bounds)
                 except Exception as map_err:
@@ -990,17 +996,7 @@ def render_gadm_input():
                     )
 
                     if show_grid_gadm:
-                        try:
-                            sat = st.session_state.selected_satellite
-                            grid = generate_pixel_grid_geojson(gdf.geometry.unary_union, sat['crs'], sat['transform'])
-                            if grid is None:
-                                pass
-                            elif grid.get("properties", {}).get("error") == "too_many_pixels":
-                                st.toast(grid["properties"]["message"])
-                            else:
-                                add_pixel_grid_overlay(m, grid)
-                        except Exception as grid_err:
-                            st.toast(f"Pixel grid unavailable: {str(grid_err)[:100]}")
+                        _maybe_add_pixel_grid(m, gdf)
 
                     # Render map
                     render_map_display(m, key="gadm_map", fit_bounds=gdf.total_bounds)

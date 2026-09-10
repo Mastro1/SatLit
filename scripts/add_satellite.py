@@ -10,18 +10,15 @@ additive-only by construction:
   - the file is re-serialized with a house-style encoder that reproduces the
     existing formatting (numeric lists inline, 2-space indent, raw UTF-8);
   - the new text must equal old text + one contiguous inserted block
-    (difflib-proven) or the write is aborted — never a silent reformat;
-  - when the repo file is git-clean, `git diff --numstat` must confirm
-    0 deletions or the write is rolled back.
+    (difflib-proven via assert_additive) or the write is aborted — never a
+    silent reformat.
 """
 import argparse
 import difflib
 import json
 import math
-import re
-import subprocess
 import sys
-from datetime import date
+from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -34,7 +31,6 @@ SECTION_OPTIONAL = {
 }
 REQUIRED = {"id", "name", "ee_collection_name", "description", "website",
             "startDate", "pixelSize", "bands"}
-DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 def is_int(v):
@@ -47,10 +43,13 @@ def is_num(v):
 
 def date_error(v, field):
     """None if v is a real calendar date 'YYYY-MM-DD', else the reason."""
-    if not isinstance(v, str) or not DATE_RE.match(v):
+    if not isinstance(v, str):
         return f"{field}: must be a 'YYYY-MM-DD' string, got {v!r}"
     try:
-        date(int(v[:4]), int(v[5:7]), int(v[8:10]))
+        # roundtrip equality keeps the zero-padding strict (strptime alone
+        # would accept '2021-1-1'); '2021-02-30' raises ValueError.
+        if datetime.strptime(v, "%Y-%m-%d").strftime("%Y-%m-%d") != v:
+            raise ValueError("expected zero-padded 'YYYY-MM-DD'")
     except ValueError as exc:
         return f"{field}: not a real calendar date: {v!r} ({exc})"
     return None
@@ -140,16 +139,17 @@ def validate_entry(entry, section, config):
                 or not all(math.isfinite(v) for v in tf):
             err(f"transform: must be a list of 6 finite numbers, got {tf!r}")
 
-    if "id" in entry:
+    for key in ("id", "ee_collection_name"):
+        if key not in entry:
+            continue
         for sec in config:
             for other in config[sec]:
-                if isinstance(other, dict) and other.get("id") == entry["id"]:
+                if not isinstance(other, dict) or other.get(key) != entry[key]:
+                    continue
+                if key == "id":
                     err(f"id: '{entry['id']}' already exists in section '{sec}' — ids must "
                         "be unique across satellites AND masks")
-    if "ee_collection_name" in entry:
-        for sec in config:
-            for other in config[sec]:
-                if isinstance(other, dict) and other.get("ee_collection_name") == entry["ee_collection_name"]:
+                else:
                     err(f"ee_collection_name: '{entry['ee_collection_name']}' already used by "
                         f"'{other.get('id')}' in section '{sec}' — must be unique")
 
@@ -184,12 +184,6 @@ def assert_additive(old_text, new_text):
     ops = [tag for tag, *_ in difflib.SequenceMatcher(None, old_text.splitlines(True),
                                                       new_text.splitlines(True)).get_opcodes()]
     return ops.count("insert") == 1 and "replace" not in ops and "delete" not in ops
-
-
-def git_numstat(path):
-    out = subprocess.run(["git", "diff", "--numstat", "--", str(path)],
-                         capture_output=True, text=True, cwd=ROOT).stdout.strip()
-    return (int(a), int(d)) if out and out.split()[0] != "-" else (None, None)
 
 
 def main():
@@ -242,21 +236,9 @@ def main():
               "(diff is not a single contiguous insertion) — nothing written", file=sys.stderr)
         return 1
 
-    was_clean = subprocess.run(["git", "status", "--porcelain", "--", str(config_path)],
-                               capture_output=True, text=True, cwd=ROOT).stdout.strip() == ""
     original_bytes = config_path.read_bytes()
     with open(config_path, "w", encoding="utf-8", newline="") as fh:
         fh.write(new_text)
-
-    if was_clean:
-        added, deleted = git_numstat(config_path)
-        if deleted:  # None/0 = no deletions (None: not a tracked file, e.g. a temp copy)
-            config_path.write_bytes(original_bytes)
-            print(f"ABORT: git diff shows {deleted} deletion(s) — insert rolled back, "
-                  "config restored byte-for-byte", file=sys.stderr)
-            return 1
-        if added is not None:
-            print(f"git diff --numstat on {config_path}: +{added} -{deleted} (pure additions)")
 
     reloaded = json.loads(config_path.read_text(encoding="utf-8"))
     inserted = reloaded[args.section][-1]

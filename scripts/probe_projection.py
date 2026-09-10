@@ -7,6 +7,9 @@ top-level satellite carrying BOTH a truthy crs and a 6-float transform) —
 no truth table is hardcoded here. Exit 0 iff all MATCH.
 
 Float comparison: a transform value matches iff abs(live - expected) <= 1e-9.
+
+Shared GEE helpers: load_project, load_gated, first_image, live_projection
+are also imported by scripts/verify_grid.py and scripts/fetch_grid_meta.py.
 """
 import argparse
 import json
@@ -54,24 +57,29 @@ def load_gated():
     return gated
 
 
-def probe(dataset, collection_id, exp_crs, exp_tf):
-    first = ee.ImageCollection(collection_id).first()
-    info = first.getInfo()
-    image_id = info["id"]
+def first_image(collection_id):
+    info = ee.ImageCollection(collection_id).first().getInfo()
     ms = info["properties"]["system:time_start"]
-    # epoch arithmetic, not fromtimestamp: ERA5-Land starts 1950 (negative
-    # epoch ms), which datetime.fromtimestamp rejects on Windows.
+    # epoch arithmetic, not fromtimestamp: pre-1970 epochs raise OSError on Windows
     date = (datetime(1970, 1, 1, tzinfo=timezone.utc) + timedelta(milliseconds=ms)).strftime("%Y-%m-%d")
+    return info["id"], date
+
+
+def live_projection(image_id):
     try:
-        proj = ee.Image(image_id).projection().getInfo()
-        proj_source = "image"
+        return ee.Image(image_id).projection().getInfo(), "image"
     except ee.ee_exception.EEException as exc:
         # ERA5_LAND_HOURLY carries bands with differing projections; band 0 is
         # the native ERA5-Land grid and is what reduceRegion aggregates over.
         if "different projections" not in str(exc):
             raise
         proj = ee.Image(image_id).select(0).projection().getInfo()
-        proj_source = "band 0 (image has mixed band projections)"
+        return proj, "band 0 (image has mixed band projections)"
+
+
+def probe(dataset, collection_id, exp_crs, exp_tf):
+    image_id, date = first_image(collection_id)
+    proj, proj_source = live_projection(image_id)
     live_crs = proj["crs"]
     live_tf = proj["transform"]
 
@@ -97,14 +105,6 @@ def probe(dataset, collection_id, exp_crs, exp_tf):
     if record["match"]:
         print(f"MATCH {dataset}")
     return record
-
-
-RECONCILIATION_NOTE = (
-    "ERA5_HOURLY plan row corrected 2026-09-10 (see .omo/notepads/pixel-grid-viz/"
-    "decisions.md): [0.25, 0, -180, 0, -0.25, 90] -> [0.25, 0, -180.125, 0, "
-    "-0.25, 90.125]; original omitted the half-pixel PixelIsArea offset the "
-    "plan's own ERA5-Land rows use. Live GEE value confirmed independently."
-)
 
 
 def main():
@@ -141,7 +141,6 @@ def main():
             {
                 "epsilon": EPS,
                 "project": project,
-                "note": RECONCILIATION_NOTE,
                 "all_match": all_match,
                 "datasets": records,
             },

@@ -1,17 +1,15 @@
 """Offline validation of the real config/satellites.json catalog.
 
-Fast, no network, no GEE init: pure schema/whitelist/uniqueness checks plus
-the real gate predicate imported from src.interface.main_panel (no
-reimplementation — a drift between catalog and gate fails loudly here).
+Fast, no network, no GEE init: the REAL validate_entry imported from
+scripts/add_satellite (no reimplementation — a drift between catalog and
+validator fails loudly here) plus the real gate predicate imported from
+src.interface.main_panel.
 
 Run from repo root: python -m pytest tests/test_satellites_catalog.py -q
 """
 import json
-import math
-import re
 import subprocess
 import sys
-from datetime import date
 from pathlib import Path
 
 import pytest
@@ -19,32 +17,11 @@ import pytest
 from src.interface.main_panel import active_satellite_supports_grid
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "scripts"))
+
+from add_satellite import validate_entry  # noqa: E402
+
 CATALOG = ROOT / "config" / "satellites.json"
-
-REQUIRED = {"id", "name", "ee_collection_name", "description", "website",
-            "startDate", "pixelSize", "bands"}
-SECTION_OPTIONAL = {
-    "satellites": {"isHourly", "cadence", "crs", "transform", "endDate", "filters"},
-    "masks": {"endDate", "filters"},
-}
-BAND_KEYS = {"name", "units", "min", "max", "description"}
-DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-
-
-def is_int(v):
-    return isinstance(v, int) and not isinstance(v, bool)
-
-
-def is_num(v):
-    return isinstance(v, (int, float)) and not isinstance(v, bool)
-
-
-def is_date(v):
-    return isinstance(v, str) and DATE_RE.match(v) and (
-        (lambda y, m, d: True if date(int(y), int(m), int(d)) else False)(*v.split("-"))
-    )
-
-
 CATALOG_DATA = json.loads(CATALOG.read_text(encoding="utf-8"))
 
 
@@ -67,45 +44,12 @@ def test_ids_and_collections_unique_across_sections():
 def test_entry_schema(section, idx):
     e = CATALOG_DATA[section][idx]
     ctx = f"{section}[{idx}] {e.get('id', '<no id>')}"
-
-    unknown = set(e) - REQUIRED - SECTION_OPTIONAL[section]
-    assert not unknown, f"{ctx}: unknown key(s) {unknown}"
-    missing = REQUIRED - set(e)
-    assert not missing, f"{ctx}: missing required key(s) {missing}"
-
-    for key in ("id", "name", "ee_collection_name", "description", "website"):
-        assert isinstance(e[key], str) and e[key], f"{ctx}: {key} must be non-empty str"
-    assert is_date(e["startDate"]), f"{ctx}: startDate not a real YYYY-MM-DD date"
-    assert is_int(e["pixelSize"]) and e["pixelSize"] > 0, f"{ctx}: pixelSize must be positive int"
-    assert isinstance(e.get("isHourly", True), bool), f"{ctx}: isHourly must be bool"
-    assert isinstance(e.get("cadence", "x"), str) and e.get("cadence", "x"), \
-        f"{ctx}: cadence must be non-empty str"
-    if "endDate" in e:
-        assert is_date(e["endDate"]), f"{ctx}: endDate not a real YYYY-MM-DD date"
-    if "filters" in e:
-        assert isinstance(e["filters"], list) and all(isinstance(f, dict) for f in e["filters"]), \
-            f"{ctx}: filters must be a list of objects"
-
-    bands = e["bands"]
-    assert isinstance(bands, list) and bands, f"{ctx}: bands must be non-empty list"
-    for i, band in enumerate(bands):
-        assert set(band) <= BAND_KEYS, f"{ctx}: bands[{i}] unknown keys {set(band) - BAND_KEYS}"
-        for key in ("name", "description"):
-            assert isinstance(band.get(key), str) and band[key], \
-                f"{ctx}: bands[{i}].{key} must be non-empty str"
-        assert isinstance(band.get("units"), str), f"{ctx}: bands[{i}].units must be str ('' allowed)"
-        for key in ("min", "max"):
-            if key in band:
-                assert is_num(band[key]), f"{ctx}: bands[{i}].{key} must be numeric"
-
-    has_crs, has_tf = "crs" in e, "transform" in e
-    assert has_crs == has_tf, f"{ctx}: crs/transform co-required (got only one)"
-    if has_tf:
-        assert isinstance(e["crs"], str) and e["crs"], f"{ctx}: crs must be non-empty str"
-        tf = e["transform"]
-        assert isinstance(tf, list) and len(tf) == 6, f"{ctx}: transform must have 6 values"
-        assert all(is_num(v) and math.isfinite(v) for v in tf), \
-            f"{ctx}: transform values must be finite numbers (int or float, not bool)"
+    # validate_entry also checks cross-section uniqueness; drop the entry by
+    # identity from the scan so it is not compared against itself.
+    rest = dict(CATALOG_DATA)
+    rest[section] = [x for x in CATALOG_DATA[section] if x is not e]
+    errors = validate_entry(e, section, rest)
+    assert not errors, f"{ctx}: {errors}"
 
 
 def test_grid_gate_predicate():

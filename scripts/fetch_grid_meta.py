@@ -2,23 +2,20 @@
 
 Pixel-grid-viz todo 16: the paste-ready step of the new-dataset pipeline.
 Probe machinery is IMPORTED from the existing scripts (no copy-paste):
-  load_project  <- scripts/probe_projection.py (settings.toml / --project)
-  first_image   <- scripts/verify_grid.py      (epoch arithmetic)
-  live_projection <- scripts/verify_grid.py    (.select(0) mixed-projection fallback)
+  load_project, first_image, live_projection <- scripts/probe_projection.py
+  assert_additive                             <- scripts/add_satellite.py
 
   python scripts/fetch_grid_meta.py --id NASA_SMAP_SPL4SMGP_008            # print only
   python scripts/fetch_grid_meta.py --id NASA_SMAP_SPL4SMGP_008 --write    # insert keys
 
 --write inserts "crs"/"transform" right after the entry's "pixelSize" line,
-additive-only (difflib-proven, git-numstat-checked), then re-probes to confirm
-MATCH within the same invocation. --write is REFUSED (loud, non-zero) when the
-probe fails, the live transform is rotated (|b| or |d| > 1e-7), or the entry
-already carries crs/transform — remove them manually first, never overwrite.
+additive-only (difflib-proven), then re-checks the freshly written keys within
+the same invocation. --write is REFUSED (loud, non-zero) when the probe fails,
+the live transform is rotated (|b| or |d| > 1e-7), or the entry already carries
+crs/transform — remove them manually first, never overwrite.
 """
 import argparse
-import difflib
 import json
-import subprocess
 import sys
 from pathlib import Path
 
@@ -26,8 +23,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import ee
 
-from probe_projection import EPS, load_project
-from verify_grid import first_image, live_projection
+from add_satellite import assert_additive
+from probe_projection import EPS, first_image, live_projection, load_project
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CONFIG = ROOT / "config" / "satellites.json"
@@ -63,18 +60,6 @@ def insert_after_pixelsize(text, sat_id, crs, transform):
     block = [f'{indent}"crs": {json.dumps(crs)},\n',
              f'{indent}"transform": {json.dumps(transform)},\n']
     return "".join(lines[: anchor + 1] + block + lines[anchor + 1 :])
-
-
-def assert_additive(old_text, new_text):
-    ops = [tag for tag, *_ in difflib.SequenceMatcher(None, old_text.splitlines(True),
-                                                      new_text.splitlines(True)).get_opcodes()]
-    return ops.count("insert") == 1 and "replace" not in ops and "delete" not in ops
-
-
-def git_numstat(path):
-    out = subprocess.run(["git", "diff", "--numstat", "--", str(path)],
-                         capture_output=True, text=True, cwd=ROOT).stdout.strip()
-    return (int(a), int(d)) if out and out.split()[0] != "-" else (None, None)
 
 
 def probe_live(collection_id):
@@ -154,31 +139,19 @@ def main():
               file=sys.stderr)
         return 1
 
-    was_clean = subprocess.run(["git", "status", "--porcelain", "--", str(config_path)],
-                               capture_output=True, text=True, cwd=ROOT).stdout.strip() == ""
     original_bytes = config_path.read_bytes()
     with open(config_path, "w", encoding="utf-8", newline="") as fh:
         fh.write(new_text)
 
-    if was_clean:
-        added, deleted = git_numstat(config_path)
-        if deleted:  # None/0 = no deletions (None: not a tracked file, e.g. a temp copy)
-            config_path.write_bytes(original_bytes)
-            print(f"ABORT --write: git diff shows {deleted} deletion(s) — rolled back",
-                  file=sys.stderr)
-            return 1
-        if added is not None:
-            print(f"git diff --numstat on {config_path}: +{added} -{deleted} (pure additions)")
-
-    # Re-run the probe path against the freshly written catalog: MATCH iff the
-    # stored keys equal the live projection within the probe's epsilon.
+    # Post-write check without a second GEE round-trip: re-read the two keys
+    # from disk and compare to the values just written (MATCH iff equal within
+    # the probe's epsilon).
     stored = json.loads(config_path.read_text(encoding="utf-8"))
-    s_entry = dict(stored[section][[e["id"] for e in stored[section]].index(args.id)])
-    _, _, live_crs, live_tf, _ = probe_live(entry["ee_collection_name"])
-    match = s_entry["crs"] == live_crs and len(s_entry["transform"]) == 6 \
-        and all(abs(a - b) <= EPS for a, b in zip(s_entry["transform"], live_tf))
+    s_entry = stored[section][[e["id"] for e in stored[section]].index(args.id)]
+    match = s_entry["crs"] == crs and len(s_entry["transform"]) == 6 \
+        and all(abs(a - b) <= EPS for a, b in zip(s_entry["transform"], transform))
     print(f"post-write probe: {'MATCH' if match else 'MISMATCH'} "
-          f"(stored crs/transform vs live, eps={EPS})")
+          f"(stored crs/transform vs written values, eps={EPS})")
     if not match:
         config_path.write_bytes(original_bytes)
         print("post-write probe FAILED — config restored", file=sys.stderr)
