@@ -15,6 +15,7 @@ import argparse
 import json
 import math
 import sys
+import tomllib
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -26,14 +27,41 @@ sys.path.insert(0, str(ROOT))
 
 from src.infrastructure.utils.grid_utils import generate_pixel_grid_geojson
 
-PROJECT = "asrdownscalingcropdata"
+SETTINGS = ROOT / "config" / "settings.toml"
+CATALOG = ROOT / "config" / "satellites.json"
 EPS = 1e-6
 MARGIN = 1e-4  # deg; ROI half-width, keeps the ROI strictly inside one cell
 
 
+def load_project(override=None):
+    """GEE project id: --project wins, else config/settings.toml [gee] project_id."""
+    if override:
+        return override
+    with open(SETTINGS, "rb") as fh:
+        project = tomllib.load(fh).get("gee", {}).get("project_id")
+    if not project:
+        raise SystemExit(
+            f"missing/empty key 'project_id' in {SETTINGS} under [gee] — "
+            "set it there or pass --project"
+        )
+    return project
+
+
+def load_gated_ids():
+    """Gated dataset ids = catalog satellites with BOTH truthy crs and a
+    6-number transform — same rule as probe_projection.load_gated."""
+    return [
+        sat["id"]
+        for sat in json.loads(CATALOG.read_text(encoding="utf-8"))["satellites"]
+        if sat.get("crs")
+        and isinstance(sat.get("transform"), list)
+        and len(sat["transform"]) == 6
+        and all(isinstance(v, (int, float)) for v in sat["transform"])
+    ]
+
+
 def load_entry(dataset):
-    config = json.loads((ROOT / "config" / "satellites.json").read_text(encoding="utf-8"))
-    for sat in config["satellites"]:
+    for sat in json.loads(CATALOG.read_text(encoding="utf-8"))["satellites"]:
         if sat["id"] == dataset:
             return sat
     raise SystemExit(f"dataset '{dataset}' not found in config/satellites.json")
@@ -88,9 +116,9 @@ def overlay_corners(lon, lat, crs, transform):
 
 def main():
     ap = argparse.ArgumentParser(description="Verify shipped pixel-grid metadata matches live GEE.")
-    ap.add_argument("--dataset", required=True,
-                    choices=["CHIRPS_DAILY", "ERA5_LAND_DAILY_AGGR", "NASA_GPM_L3_IMERG_V07",
-                             "NASA_SMAP_SPL4SMGP_008"])
+    ap.add_argument("--dataset", required=True, choices=load_gated_ids())
+    ap.add_argument("--project", default=None,
+                    help="GEE project id (default: config/settings.toml [gee] project_id)")
     ap.add_argument("--lon", type=float, required=True)
     ap.add_argument("--lat", type=float, required=True)
     ap.add_argument("--tamper-shift-c", type=float, default=0.0,
@@ -98,7 +126,7 @@ def main():
                          "before diffing (simulates a half-pixel config error)")
     args = ap.parse_args()
 
-    ee.Initialize(project=PROJECT)
+    ee.Initialize(project=load_project(args.project))
     sat = load_entry(args.dataset)
     cfg_crs, cfg_tf = sat["crs"], sat["transform"]
 

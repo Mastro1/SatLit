@@ -1,12 +1,17 @@
 """Live GEE projection proof for pixel-grid-viz todo 2.
 
 Probes one image per gated dataset family and diffs the returned
-projection against the plan's truth table. Exit 0 iff all MATCH.
+projection against the catalog. The gated set, collections, and expected
+crs/transform are derived at runtime from config/satellites.json (every
+top-level satellite carrying BOTH a truthy crs and a 6-float transform) —
+no truth table is hardcoded here. Exit 0 iff all MATCH.
 
 Float comparison: a transform value matches iff abs(live - expected) <= 1e-9.
 """
+import argparse
 import json
 import sys
+import tomllib
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -14,53 +19,39 @@ import ee
 
 ROOT = Path(__file__).resolve().parent.parent
 EVIDENCE = ROOT / ".omo/evidence/task-2-pixel-grid-viz.json"
-PROJECT = "asrdownscalingcropdata"
+SETTINGS = ROOT / "config" / "settings.toml"
+CATALOG = ROOT / "config" / "satellites.json"
 EPS = 1e-9
 
-# Truth table from the pixel-grid-viz plan. Collection IDs read from
-# config/satellites.json. All 5 gated SHOW datasets are probed, plus SMAP
-# (todo 13): ERA5_LAND_HOURLY shares ERA5_LAND_DAILY_AGGR's grid; ERA5_HOURLY
-# is the coarse 0.25 deg ECMWF/ERA5/HOURLY collection (pixelSize 27830).
-TRUTH = {
-    "CHIRPS_DAILY": (
-        "UCSB-CHG/CHIRPS/DAILY",
-        "EPSG:4326",
-        [0.05, 0, -180, 0, -0.05, 50],
-    ),
-    "NASA_GPM_L3_IMERG_V07": (
-        "NASA/GPM_L3/IMERG_V07",
-        "EPSG:4326",
-        [0.1, 0, -180, 0, -0.1, 90],
-    ),
-    "ERA5_LAND_DAILY_AGGR": (
-        "ECMWF/ERA5_LAND/DAILY_AGGR",
-        "EPSG:4326",
-        [0.1, 0, -180.05, 0, -0.1, 90.05],
-    ),
-    "ERA5_LAND_HOURLY": (
-        "ECMWF/ERA5_LAND/HOURLY",
-        "EPSG:4326",
-        [0.1, 0, -180.05, 0, -0.1, 90.05],
-    ),
-    "ERA5_HOURLY": (
-        "ECMWF/ERA5/HOURLY",
-        "EPSG:4326",
-        # Plan row reconciled 2026-09-10 (decisions.md): original [0.25, 0,
-        # -180, 0, -0.25, 90] omitted the half-pixel PixelIsArea offset the
-        # plan's own ERA5-Land rows use; live GEE value confirmed independently.
-        [0.25, 0, -180.125, 0, -0.25, 90.125],
-    ),
-    "NASA_SMAP_SPL4SMGP_008": (
-        "NASA/SMAP/SPL4SMGP/008",
-        "EPSG:4326",
-        # todo 13 (2026-09-10): natively EPSG:4326 despite the 9 km EASE-Grid
-        # product spec; ~0.095 deg cells, x/y scales differ microscopically,
-        # top edge 85.0445 (polar gap — no cells above ~85N, correct not a bug).
-        [0.09516256938937351, 0, -180, 0, -0.09516149300142858, 85.0445018795655],
-    ),
-}
-
 TRANSFORM_NAMES = ["a", "b", "c", "d", "e", "f"]
+
+
+def load_project(override=None):
+    """GEE project id: --project wins, else config/settings.toml [gee] project_id."""
+    if override:
+        return override
+    with open(SETTINGS, "rb") as fh:
+        project = tomllib.load(fh).get("gee", {}).get("project_id")
+    if not project:
+        raise SystemExit(
+            f"missing/empty key 'project_id' in {SETTINGS} under [gee] — "
+            "set it there or pass --project"
+        )
+    return project
+
+
+def load_gated():
+    """Gated probe set = catalog satellites with BOTH truthy crs and a
+    6-number transform. Collections and expectations come from the same
+    entries. Catalog order preserved."""
+    gated = {}
+    for sat in json.loads(CATALOG.read_text(encoding="utf-8"))["satellites"]:
+        crs, tf = sat.get("crs"), sat.get("transform")
+        if crs and isinstance(tf, list) and len(tf) == 6 and all(isinstance(v, (int, float)) for v in tf):
+            gated[sat["id"]] = (sat["ee_collection_name"], crs, tf)
+    if not gated:
+        raise SystemExit(f"no gated datasets found in {CATALOG} (need crs + 6-float transform)")
+    return gated
 
 
 def probe(dataset, collection_id, exp_crs, exp_tf):
@@ -117,16 +108,39 @@ RECONCILIATION_NOTE = (
 
 
 def main():
-    ee.Initialize(project=PROJECT)
+    ap = argparse.ArgumentParser(description="Probe live GEE projections vs the satellites.json catalog.")
+    ap.add_argument("--project", default=None,
+                    help="GEE project id (default: config/settings.toml [gee] project_id)")
+    ap.add_argument("--tamper", metavar="DATASET:FIELD:SHIFT", default=None,
+                    help="sensitivity check: shift the expected transform FIELD of DATASET by "
+                         "SHIFT before diffing, e.g. ERA5_LAND_DAILY_AGGR:c:0.05 "
+                         "(mirrors verify_grid.py --tamper-shift-c)")
+    args = ap.parse_args()
+
+    project = load_project(args.project)
+    gated = load_gated()
+    if args.tamper:
+        parts = args.tamper.split(":")
+        if len(parts) != 3:
+            raise SystemExit(f"--tamper expects DATASET:FIELD:SHIFT, got '{args.tamper}'")
+        ds, field, shift = parts
+        if ds not in gated:
+            raise SystemExit(f"--tamper dataset '{ds}' not in gated set {sorted(gated)}")
+        if field not in TRANSFORM_NAMES:
+            raise SystemExit(f"--tamper field '{field}' must be one of {TRANSFORM_NAMES}")
+        gated[ds][2][TRANSFORM_NAMES.index(field)] += float(shift)
+        print(f"tampered expected {ds} transform.{field} by {shift}")
+
+    ee.Initialize(project=project)
     print(f"epsilon: transform value matches iff abs(live - expected) <= {EPS}")
-    records = [probe(ds, *truth) for ds, truth in TRUTH.items()]
+    records = [probe(ds, *truth) for ds, truth in gated.items()]
     all_match = all(r["match"] for r in records)
     EVIDENCE.parent.mkdir(parents=True, exist_ok=True)
     EVIDENCE.write_text(
         json.dumps(
             {
                 "epsilon": EPS,
-                "project": PROJECT,
+                "project": project,
                 "note": RECONCILIATION_NOTE,
                 "all_match": all_match,
                 "datasets": records,

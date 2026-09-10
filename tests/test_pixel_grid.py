@@ -6,19 +6,34 @@ implementation formula. ROIs are strictly inside a single grid cell so results
 are deterministic.
 """
 
+import json
 import time
+from pathlib import Path
 
 import pytest
 from shapely.geometry import Polygon
 
 from src.infrastructure.utils.grid_utils import generate_pixel_grid_geojson
 
-CHIRPS_TRANSFORM = [0.05, 0, -180, 0, -0.05, 50]
-ERA5_TRANSFORM = [0.1, 0, -180.05, 0, -0.1, 90.05]
+
+def _catalog_transform(sat_id):
+    """INPUT transforms come from config/satellites.json so a catalog edit
+    fails loudly here and forces re-verification against live GEE; all
+    EXPECTED outputs in the tests below stay literal so the tests never
+    mirror the implementation."""
+    catalog = Path(__file__).resolve().parent.parent / "config" / "satellites.json"
+    for sat in json.loads(catalog.read_text(encoding="utf-8"))["satellites"]:
+        if sat["id"] == sat_id:
+            return sat["transform"]
+    raise AssertionError(f"{sat_id} not found in config/satellites.json")
+
+
+CHIRPS_TRANSFORM = _catalog_transform("CHIRPS_DAILY")
+ERA5_TRANSFORM = _catalog_transform("ERA5_LAND_DAILY_AGGR")
 # SMAP SPL4SMGP v008, live-verified 2026-09-10 (probe_projection.py MATCH):
 # natively EPSG:4326 despite the 9 km EASE-Grid spec; ~0.095 deg cells.
-SMAP_TRANSFORM = [0.09516256938937351, 0, -180, 0, -0.09516149300142858, 85.0445018795655]
-UTM33N_TRANSFORM = [10, 0, 500000, 0, -10, 5000000]
+SMAP_TRANSFORM = _catalog_transform("NASA_SMAP_SPL4SMGP_008")
+UTM33N_TRANSFORM = [10, 0, 500000, 0, -10, 5000000]  # synthetic fixture, stays literal
 TOL = 1e-9
 
 
