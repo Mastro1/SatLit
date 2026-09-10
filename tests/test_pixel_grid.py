@@ -6,6 +6,8 @@ implementation formula. ROIs are strictly inside a single grid cell so results
 are deterministic.
 """
 
+import time
+
 import pytest
 from shapely.geometry import Polygon
 
@@ -161,3 +163,45 @@ def test_non_4326_reprojection_path():
     ys = [pt[1] for pt in pts]
     assert -180 <= min(xs) < max(xs) <= 180
     assert -90 <= min(ys) < max(ys) <= 90
+
+
+def test_guard_1000_cells_passes():
+    # Given: a ROI whose edges sit on ERA5-Land cell MIDPOINTS, spanning exactly
+    # 40 cols x 25 rows = 1000 cells (x in [c+0.5a, c+39.5a], y in [f-24.5|e|, f-0.5|e|])
+    roi = _box(-180.00, 87.60, -176.10, 90.00)
+    # When: the pixel grid is generated with the default max_pixels=1000
+    fc = generate_pixel_grid_geojson(roi, "EPSG:4326", ERA5_TRANSFORM)
+    # Then: a REAL grid — the guard is a strict > comparison, 1000 is allowed
+    assert fc is not None
+    assert "error" not in fc["properties"]
+    assert fc["properties"]["total_pixels"] == 1000
+    assert len(fc["features"]) == 1000
+
+
+def test_guard_1001_cells_rejected():
+    # Given: a ROI whose edges sit on ERA5-Land cell MIDPOINTS, spanning exactly
+    # 143 cols x 7 rows = 1001 cells (x in [c+0.5a, c+142.5a], y in [f-6.5|e|, f-0.5|e|])
+    roi = _box(-180.00, 89.40, -165.80, 90.00)
+    # When: the pixel grid is generated with the default max_pixels=1000
+    fc = generate_pixel_grid_geojson(roi, "EPSG:4326", ERA5_TRANSFORM)
+    # Then: the too_many_pixels payload with empty features — one cell over fails
+    assert fc["features"] == []
+    assert fc["properties"]["error"] == "too_many_pixels"
+    assert fc["properties"]["message"] == (
+        "Grid contains 1001 pixels (limit: 1000). "
+        "Please zoom in or use a smaller region."
+    )
+
+
+def test_timing_single_cell_under_3s():
+    # Given: the CHIRPS single-cell reference AOI (same box as the worked example)
+    roi = _box(12.36, 45.01, 12.39, 45.04)
+    # When: generation is timed with perf_counter
+    t0 = time.perf_counter()
+    fc = generate_pixel_grid_geojson(roi, "EPSG:4326", CHIRPS_TRANSFORM)
+    elapsed = time.perf_counter() - t0
+    # Then: correct result, wall time far under the generous 3s bound
+    assert fc is not None
+    assert fc["properties"]["total_pixels"] == 1
+    assert elapsed < 3.0
+    print(f"\ngenerate_pixel_grid_geojson wall time (CHIRPS single cell): {elapsed * 1000:.2f} ms")
