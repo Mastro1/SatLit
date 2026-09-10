@@ -31,6 +31,13 @@ DEFAULT_HIGHLIGHT = {
     'fillOpacity': 0.6,
 }
 
+GRID_STYLE = {
+    'fillColor': 'rgba(0,0,0,0)',
+    'color': '#2563EB',
+    'weight': 1,
+    'fillOpacity': 0.0,
+}
+
 
 # --- Builder functions ---
 
@@ -139,6 +146,64 @@ def add_geojson_overlay(m, geojson_data, style=None, highlight=None,
     geojson_layer.add_to(m)
 
     return geojson_layer
+
+
+class ZoomVisibilityPlugin(folium.MacroElement):
+    """Folium plugin to control visibility of a layer based on the map's zoom level."""
+    def __init__(self, layer_name, min_zoom):
+        super().__init__()
+        self._name = 'ZoomVisibilityPlugin'
+        self._layer_name = layer_name
+        self._min_zoom = min_zoom
+        self._template = Template("""
+        {% macro script(this, kwargs) %}
+        (function() {
+            var map = {{this._parent.get_name()}};
+            var layer = {{this._layer_name}};
+
+            function checkZoom() {
+                var zoom = map.getZoom();
+                if (zoom < {{this._min_zoom}}) {
+                    if (map.hasLayer(layer)) {
+                        map.removeLayer(layer);
+                    }
+                } else {
+                    if (!map.hasLayer(layer)) {
+                        map.addLayer(layer);
+                    }
+                }
+            }
+
+            map.on('zoomend', checkZoom);
+            // Run initially
+            checkZoom();
+        })();
+        {% endmacro %}
+        """)
+
+
+def add_pixel_grid_overlay(m, grid_geojson, min_zoom=8):
+    """Add a viz-only pixel-grid overlay to a Folium map.
+
+    Args:
+        m: folium.Map to add the layer to.
+        grid_geojson: GeoJSON dict of grid cells (with col_row properties).
+        min_zoom: Minimum zoom at which the layer stays visible.
+            None disables the zoom gate.
+
+    Returns:
+        The folium.GeoJson layer added to the map.
+    """
+    layer = folium.GeoJson(
+        grid_geojson,
+        style_function=lambda x: GRID_STYLE,
+        control=True,
+        name="Pixel grid",
+    )
+    layer.add_to(m)
+    if min_zoom is not None:
+        ZoomVisibilityPlugin(layer.get_name(), min_zoom).add_to(m)
+    return layer
 
 
 def add_markers(m, points, color='red', icon='info-sign', label_format=None):
