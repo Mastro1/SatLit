@@ -1,5 +1,5 @@
 ---
-name: release
+name: new-release
 description: Step-by-step guide for shipping a new version of SatLit. Use this skill whenever changes are ready to be released to users — it covers versioning, changelog, README review, and pushing to main.
 ---
 
@@ -38,7 +38,7 @@ Read `README.md` in full. Cross-reference it against all changes being released 
 - Does the **Usage / Workflow** section still accurately describe the steps?
 - Does the **Architecture** section still reflect the actual structure?
 
-If any section is stale or missing coverage of the new changes, update it. If nothing needs changing, leave it untouched — do not add noise.
+If any section is stale or missing coverage of the new changes, summarize exactly what you plan to change and ask for approval before editing. If nothing needs changing, say so and skip README edits.
 
 ---
 
@@ -79,14 +79,21 @@ dependencies, and restarts the server in place.
 
 ## 5. Merge into main
 
+Ask for approval before merging. If approved:
+
 ```bash
 git checkout main
-git merge dev --no-ff -m "release: vX.Y.Z"
+git merge <working-branch> --no-ff -m "release: vX.Y.Z"
 git push origin main
-git checkout dev
 ```
 
-Use `--no-ff` to keep the merge history readable.
+Stay on `main` — do not switch back to the working branch. Use `--no-ff` to keep the merge history readable.
+
+Then ask if the working branch should be deleted. If yes:
+
+```bash
+git branch -d <working-branch>
+```
 
 ---
 
