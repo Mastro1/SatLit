@@ -36,6 +36,19 @@ def test_finalize_embeds_plugin_payload():
     assert "baselayerchange" in html
 
 
+def test_basemap_lookup_matches_by_attribution():
+    bounds = [12.3, 45.0, 12.4, 45.1]
+    m = create_base_map(center=[45.05, 12.35], zoom=5)
+    _finalize(m, "test_view_attr", bounds)
+    html = m.get_root().render()
+    # Rendered tile options carry attribution (never a name key).
+    assert '"attribution": "Esri"' in html
+    assert '"attribution": "OpenStreetMap"' in html
+    # Plugin resolves bases via the public attribution hook, not options.name.
+    assert "l.options.attribution" in html
+    assert "l.options.name" not in html
+
+
 def test_finalize_without_bounds_attaches_nothing():
     m = create_base_map(center=[0, 0], zoom=5)
     _finalize(m, "test_view_map_none", None)

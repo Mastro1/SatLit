@@ -321,6 +321,11 @@ class ViewPersistencePlugin(folium.MacroElement):
             var ROI_HASH = '{{this._roi_hash}}';
             var KNOWN_BASES = ['Satellite', 'Streets'];
             var currentBase = null;
+            // Public hook: folium renders TileLayer `attr` into L.tileLayer
+            // options.attribution (create_base_map: "Esri" / "OpenStreetMap");
+            // it never emits a `name` key, so options.name can never match.
+            var BASE_ATTR = {Satellite: 'Esri', Streets: 'OpenStreetMap'};
+            var seenLayers = {};
 
             function loadView() {
                 try {
@@ -343,13 +348,41 @@ class ViewPersistencePlugin(folium.MacroElement):
             function baseLayerByName(name) {
                 var found = null;
                 try {
+                    if (seenLayers[name]) return seenLayers[name];
+                } catch (e) {}
+                var want = null;
+                try {
+                    want = BASE_ATTR[name] || null;
+                } catch (e) {}
+                try {
                     map.eachLayer(function(l) {
                         try {
-                            if (l && l.options && l.options.name === name) found = l;
+                            if (l && l.options && want && l.options.attribution === want) found = l;
                         } catch (e) {}
                     });
                 } catch (e) {}
                 return found;
+            }
+
+            function activateBaseViaControl(name) {
+                // Cold-start fallback: folium only .addTo()s the active base,
+                // so the inactive layer object is invisible to eachLayer —
+                // click its LayerControl radio instead (fires baselayerchange,
+                // which persists via the store path below).
+                try {
+                    var base = document.querySelector('.leaflet-control-layers-base');
+                    if (!base) return false;
+                    var labels = base.getElementsByTagName('label');
+                    for (var k = 0; k < labels.length; k++) {
+                        var txt = labels[k].textContent || '';
+                        if (txt.indexOf(name) === -1) continue;
+                        var input = labels[k].querySelector('input');
+                        if (input && !input.checked) input.click();
+                        try { currentBase = name; } catch (e2) {}
+                        return true;
+                    }
+                } catch (e) {}
+                return false;
             }
 
             function activateBase(name) {
@@ -360,7 +393,7 @@ class ViewPersistencePlugin(folium.MacroElement):
                 }
                 if (!known) return;
                 var target = baseLayerByName(name);
-                if (!target) return;
+                if (!target) { activateBaseViaControl(name); return; }
                 try {
                     for (var j = 0; j < KNOWN_BASES.length; j++) {
                         if (KNOWN_BASES[j] === name) continue;
@@ -429,6 +462,11 @@ class ViewPersistencePlugin(folium.MacroElement):
                         var n = e && e.name;
                         if (!n) return;
                         currentBase = n;
+                        // e.name is the LayerControl label ("Satellite"/"Streets",
+                        // exactly the base_layers keys folium renders) — reliable,
+                        // so the store path stays as-is. Cache the public layer
+                        // object for warm lookups.
+                        try { if (e.layer) seenLayers[n] = e.layer; } catch (err2) {}
                         var center = readCenter();
                         var zoom = readZoom();
                         if (!center || zoom === null || zoom === undefined) return;
