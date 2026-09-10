@@ -797,11 +797,13 @@ def render_shapefile_input():
         
         if st.session_state.get('import_preview_ready'):
             st.markdown("**Import Preview:**")
-            show_grid_import = (
-                st.checkbox("Show pixel grid", value=False, key="show_grid_import")
-                if geo_type != 'points' and active_satellite_supports_grid()
-                else False
-            )
+            if geo_type != 'points' and active_satellite_supports_grid():
+                show_grid_import = st.checkbox(
+                    "Show pixel grid", value=False, key="show_grid_import"
+                )
+                st.caption("Display-only preview of this dataset's native pixels — no download or selection.")
+            else:
+                show_grid_import = False
             import_path = st.session_state.get('uploaded_shapefile', '')
             if import_path and os.path.exists(import_path):
                 try:
@@ -948,11 +950,13 @@ def render_gadm_input():
                 
                 # Display map
                 st.markdown("**Boundary Preview:**")
-                show_grid_gadm = (
-                    st.checkbox("Show pixel grid", value=False, key="show_grid_gadm")
-                    if active_satellite_supports_grid()
-                    else False
-                )
+                if active_satellite_supports_grid():
+                    show_grid_gadm = st.checkbox(
+                        "Show pixel grid", value=False, key="show_grid_gadm"
+                    )
+                    st.caption("Display-only preview of this dataset's native pixels — no download or selection.")
+                else:
+                    show_grid_gadm = False
 
                 try:
                     # Get centroid for map center
