@@ -61,6 +61,7 @@ This tool is especially useful for:
 | Weather & Climate | Temperature, Wind, Humidity | ERA5 Hourly & ERA5-Land (Hourly & Daily) |
 | Precipitation | High-resolution rainfall | CHIRPS Daily |
 | Precipitation | Near-real-time global rain | GPM IMERG V07 (30-Min) |
+| Soil Moisture | Surface & root-zone soil moisture, temp, fluxes | SMAP SPL4SMGP v008 (3-Hourly) |
 
 > More datasets are planned — see the [Roadmap](#-roadmap).
 
