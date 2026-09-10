@@ -3050,6 +3050,8 @@
       "isHourly": true,
       "name": "SMAP L4 Global 3-hourly 9-km Surface and Root Zone Soil Moisture",
       "pixelSize": 11000,
+      "crs": "EPSG:4326",
+      "transform": [0.09516256938937351, 0, -180, 0, -0.09516149300142858, 85.0445018795655],
       "startDate": "2015-03-31",
       "website": "https://developers.google.com/earth-engine/datasets/catalog/NASA_SMAP_SPL4SMGP_008"
     }

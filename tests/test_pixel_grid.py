@@ -15,6 +15,9 @@ from src.infrastructure.utils.grid_utils import generate_pixel_grid_geojson
 
 CHIRPS_TRANSFORM = [0.05, 0, -180, 0, -0.05, 50]
 ERA5_TRANSFORM = [0.1, 0, -180.05, 0, -0.1, 90.05]
+# SMAP SPL4SMGP v008, live-verified 2026-09-10 (probe_projection.py MATCH):
+# natively EPSG:4326 despite the 9 km EASE-Grid spec; ~0.095 deg cells.
+SMAP_TRANSFORM = [0.09516256938937351, 0, -180, 0, -0.09516149300142858, 85.0445018795655]
 UTM33N_TRANSFORM = [10, 0, 500000, 0, -10, 5000000]
 TOL = 1e-9
 
@@ -76,6 +79,35 @@ def test_era5_land_worked_example_single_cell():
     assert y_max == pytest.approx(45.05, abs=TOL)
     assert feature["properties"]["center_lon"] == pytest.approx(12.40, abs=TOL)
     assert feature["properties"]["center_lat"] == pytest.approx(45.00, abs=TOL)
+
+
+def test_smap_worked_example_single_cell():
+    # Given: the live-verified SMAP ~0.095-deg grid, ROI strictly inside the
+    # single cell containing (12.35, 45.05). Expected values hand-computed
+    # from SMAP_TRANSFORM with the module's floor math:
+    #   col = floor((12.35 - (-180)) / 0.09516256938937351) = floor(2021.13) = 2021
+    #   row = floor((45.05 - 85.0445018795655) / -0.09516149300142858) = floor(420.26) = 420
+    roi = _box(12.34, 45.00, 12.41, 45.07)
+    # When: the pixel grid is generated
+    fc = generate_pixel_grid_geojson(roi, "EPSG:4326", SMAP_TRANSFORM)
+    # Then: exactly one feature — the hand-verified cell
+    assert fc is not None
+    assert fc["properties"]["total_pixels"] == 1
+    (feature,) = fc["features"]
+    assert feature["properties"]["col"] == 2021
+    assert feature["properties"]["row"] == 420
+    assert feature["properties"]["col_row"] == "2021_420"
+    x_min, x_max, y_min, y_max = _extent(feature)
+    assert x_min == pytest.approx(12.323552735923869, abs=TOL)
+    assert x_max == pytest.approx(12.418715305313242, abs=TOL)
+    assert y_min == pytest.approx(44.981513325964073, abs=TOL)
+    assert y_max == pytest.approx(45.0766748189655, abs=TOL)
+    # Center is derived from the same corners ((x0+x1)/2, (ytop+ybot)/2 =
+    # 12.371134020618555 / 45.029094072464787) then rounded to 6 decimals by
+    # grid_utils (round(center.x/.y, 6)) — SMAP is the first fixture whose
+    # center exposes that rounding (CHIRPS/ERA5 centers were exact at 6 dp).
+    assert feature["properties"]["center_lon"] == pytest.approx(12.371134, abs=TOL)
+    assert feature["properties"]["center_lat"] == pytest.approx(45.029094, abs=TOL)
 
 
 def test_floor_at_cell_corner_gives_lower_cell():

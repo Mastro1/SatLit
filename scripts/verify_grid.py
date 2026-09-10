@@ -89,7 +89,8 @@ def overlay_corners(lon, lat, crs, transform):
 def main():
     ap = argparse.ArgumentParser(description="Verify shipped pixel-grid metadata matches live GEE.")
     ap.add_argument("--dataset", required=True,
-                    choices=["CHIRPS_DAILY", "ERA5_LAND_DAILY_AGGR", "NASA_GPM_L3_IMERG_V07"])
+                    choices=["CHIRPS_DAILY", "ERA5_LAND_DAILY_AGGR", "NASA_GPM_L3_IMERG_V07",
+                             "NASA_SMAP_SPL4SMGP_008"])
     ap.add_argument("--lon", type=float, required=True)
     ap.add_argument("--lat", type=float, required=True)
     ap.add_argument("--tamper-shift-c", type=float, default=0.0,

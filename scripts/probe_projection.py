@@ -18,9 +18,9 @@ PROJECT = "asrdownscalingcropdata"
 EPS = 1e-9
 
 # Truth table from the pixel-grid-viz plan. Collection IDs read from
-# config/satellites.json. All 5 gated SHOW datasets are probed:
-# ERA5_LAND_HOURLY shares ERA5_LAND_DAILY_AGGR's grid; ERA5_HOURLY is the
-# coarse 0.25 deg ECMWF/ERA5/HOURLY collection (pixelSize 27830).
+# config/satellites.json. All 5 gated SHOW datasets are probed, plus SMAP
+# (todo 13): ERA5_LAND_HOURLY shares ERA5_LAND_DAILY_AGGR's grid; ERA5_HOURLY
+# is the coarse 0.25 deg ECMWF/ERA5/HOURLY collection (pixelSize 27830).
 TRUTH = {
     "CHIRPS_DAILY": (
         "UCSB-CHG/CHIRPS/DAILY",
@@ -49,6 +49,14 @@ TRUTH = {
         # -180, 0, -0.25, 90] omitted the half-pixel PixelIsArea offset the
         # plan's own ERA5-Land rows use; live GEE value confirmed independently.
         [0.25, 0, -180.125, 0, -0.25, 90.125],
+    ),
+    "NASA_SMAP_SPL4SMGP_008": (
+        "NASA/SMAP/SPL4SMGP/008",
+        "EPSG:4326",
+        # todo 13 (2026-09-10): natively EPSG:4326 despite the 9 km EASE-Grid
+        # product spec; ~0.095 deg cells, x/y scales differ microscopically,
+        # top edge 85.0445 (polar gap — no cells above ~85N, correct not a bug).
+        [0.09516256938937351, 0, -180, 0, -0.09516149300142858, 85.0445018795655],
     ),
 }
 

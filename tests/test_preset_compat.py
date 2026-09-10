@@ -49,9 +49,11 @@ def test_old_chirps_preset_loads_and_grid_available():
 
 
 def test_unsupported_datasets_load_but_grid_hidden():
-    # MODIS and SMAP lack crs/transform in the catalog: the preset still
+    # MODIS lacks crs/transform in the catalog: the preset still
     # loads, but the toggle predicate is False so the checkbox never renders.
-    for sat_id in ("MODIS_MOD13Q1_061", "NASA_SMAP_SPL4SMGP_008"):
+    # (SMAP originally shared this test — todo 13 gave it verified grid
+    # metadata, so it now asserts True in its own test below.)
+    for sat_id in ("MODIS_MOD13Q1_061",):
         payload = copy.deepcopy(OLD_SHARE_PAYLOAD)
         payload["config"]["satellite"] = sat_id
 
@@ -59,6 +61,24 @@ def test_unsupported_datasets_load_but_grid_hidden():
 
         assert draft["config"]["satellite"] == sat_id
         assert active_satellite_supports_grid(resolve_satellite(sat_id)) is False
+
+
+def test_old_smap_preset_loads_and_grid_available():
+    # Old-era SMAP payload (pre-todo-13: no crs/transform in the catalog)
+    # still loads cleanly, and the verified SMAP grid metadata added in
+    # todo 13 (EPSG:4326, ~0.095 deg cells, pixelSize 11000 >= 1000) makes
+    # the toggle predicate True.
+    payload = copy.deepcopy(OLD_SHARE_PAYLOAD)
+    payload["config"]["satellite"] = "NASA_SMAP_SPL4SMGP_008"
+
+    draft = from_share_payload(payload)
+
+    assert draft["config"]["satellite"] == "NASA_SMAP_SPL4SMGP_008"
+    sat = resolve_satellite(draft["config"]["satellite"])
+    assert sat is not None
+    assert sat["crs"] == "EPSG:4326"
+    assert len(sat["transform"]) == 6
+    assert active_satellite_supports_grid(sat) is True
 
 
 def test_worldcereal_is_a_mask_not_a_satellite():
