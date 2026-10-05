@@ -13,8 +13,9 @@ description: >
  
 # GEE Satellite JSON Entry Creator
  
-Produces a single JSON object ready to paste into the `satellites` array of `satellites.json`
-for the [SatLit](https://github.com/Mastro1/SatLit) project.
+Produces a single JSON entry object for the `satellites` (or `masks`) array of `satellites.json`
+for the [SatLit](https://github.com/Mastro1/SatLit) project, then walks it through the safe
+validate → insert → grid-probe → test pipeline (Steps 5–6).
  
 ---
  
@@ -82,12 +83,12 @@ Extract **every row** from the Bands table in the `.md.txt`. For each band:
 - Do **not** skip any band, including QA flags, bitmask bands, error bands, or static/time-invariant bands.
 ---
  
-## Step 4 — Produce the JSON entry
- 
-Output a single, valid JSON object matching the schema below. Do **not** wrap it in the outer `{"satellites": [...]}` structure — output only the object to paste into the array.
- 
+## Step 4 — Produce the JSON entry file
+
+Produce a single, valid JSON object matching the schema below. Do **not** wrap it in the outer `{"satellites": [...]}` structure — output only the object. **Save it as a `.json` file** (e.g. `new_dataset.json`) — the pipeline script consumes the file, not a chat paste.
+
 ### Schema
- 
+
 ```json
 {
   "id": "STRING",
@@ -99,6 +100,8 @@ Output a single, valid JSON object matching the schema below. Do **not** wrap it
   "isHourly": true,           // optional — set true for ANY sub-daily cadence (< 1 day)
   "cadence": "STRING",        // optional — include for all sub-daily datasets (e.g. "30min", "1h")
   "pixelSize": INTEGER,
+  "crs": "STRING",            // optional — VERIFIED-LIVE-ONLY, see rule below. NEVER invent.
+  "transform": [NUMBER x6],   // optional — VERIFIED-LIVE-ONLY, see rule below. NEVER invent.
   "bands": [
     {
       "name": "STRING",
@@ -110,43 +113,76 @@ Output a single, valid JSON object matching the schema below. Do **not** wrap it
   ]
 }
 ```
- 
+
+**`crs` / `transform` rule (pixel-grid overlay):** these two keys are **co-required** (both or neither) and must come from `scripts/fetch_grid_meta.py` probing the LIVE GEE projection — **NEVER** derive, estimate, or invent them from documentation, band tables, or prior datasets. Without them the dataset simply does not get the pixel-grid toggle (the UI gate hides it — that is expected behavior, not an error); with wrong values the overlay renders a false grid, which is worse. The script refuses to overwrite existing values — removal is always manual. Rotation (`transform` b/d ≠ 0) and sub-kilometre pixels are not overlay-compatible.
+
 ### Field presence rules (summary)
- 
+
 | Field | Required | Notes |
 |---|---|---|
-| `id` | ✅ | Always |
+| `id` | ✅ | Always; unique across satellites AND masks |
 | `name` | ✅ | Always |
-| `ee_collection_name` | ✅ | Always |
+| `ee_collection_name` | ✅ | Always; unique |
 | `description` | ✅ | Always |
 | `website` | ✅ | Always |
-| `startDate` | ✅ | Always |
+| `startDate` | ✅ | Always, real calendar date `YYYY-MM-DD` |
 | `isHourly` | ⚙️ | `true` for any sub-daily cadence (< 1 day); omit for daily or longer |
 | `cadence` | ⚙️ | Include for all sub-daily datasets; omit for daily or longer |
-| `pixelSize` | ✅ | Always |
+| `pixelSize` | ✅ | Always, positive integer (metres) |
+| `crs` | ⚙️ | Only via `fetch_grid_meta.py --write` (live-verified); co-required with `transform` |
+| `transform` | ⚙️ | Only via `fetch_grid_meta.py --write` (live-verified); 6 numbers |
 | `bands[].name` | ✅ | Always |
 | `bands[].units` | ✅ | Always (use `""` if none) |
 | `bands[].min` | ⚙️ | Only if source provides it |
 | `bands[].max` | ⚙️ | Only if source provides it |
 | `bands[].description` | ✅ | Always |
- 
+
+Any other top-level key (e.g. a typo like `transfrom`) is **rejected** by the validator — the whitelist is enforced, not advisory.
+
 ---
- 
-## Step 5 — Validate and deliver
- 
-Before outputting:
-1. Confirm the JSON is syntactically valid (no trailing commas, all strings quoted).
-2. Confirm band count matches the source table.
-3. Save the output as a `.json` file and present it to the user with `present_files`.
-After presenting, briefly note:
+
+## Step 5 — Validate and insert with the pipeline
+
+Do **not** hand-edit `config/satellites.json`. Run the safe pipeline from the repo root:
+
+```powershell
+# 1. Validate first — reports every schema/whitelist/uniqueness error, changes nothing
+& ".venv/Scripts/python.exe" scripts/add_satellite.py --entry new_dataset.json --dry-run
+
+# 2. Fix any reported errors and re-run --dry-run until it passes
+
+# 3. Insert (appends to the "satellites" array; use --section masks for mask datasets)
+& ".venv/Scripts/python.exe" scripts/add_satellite.py --entry new_dataset.json
+
+# 4. Fetch verified grid metadata (LIVE probe; print first, then write)
+& ".venv/Scripts/python.exe" scripts/fetch_grid_meta.py --id <NEW_ID>
+& ".venv/Scripts/python.exe" scripts/fetch_grid_meta.py --id <NEW_ID> --write
+```
+
+Script behavior you can rely on:
+- `add_satellite.py` validates real calendar dates, positive-int `pixelSize` (bools rejected), band schema, per-section optional-key whitelists, id + `ee_collection_name` uniqueness across both sections, and crs/transform co-presence + 6 finite numbers. Every failure exits non-zero naming the offending field.
+- The insert is additive-only: the script proves the diff is a single contiguous insertion before writing (git-numstat + rollback otherwise) — it can never silently reformat the file.
+- `fetch_grid_meta.py --write` inserts `crs` + `transform` after the entry's `pixelSize` line, then re-probes to confirm a MATCH in the same invocation. It refuses — loudly, without writing — if the probe fails, the live transform is rotated (|b| or |d| > 1e-7), or the entry already carries either key (remove manually first; never overwritten silently).
+
+---
+
+## Step 6 — Test
+
+```powershell
+& ".venv/Scripts/python.exe" -m pytest tests/test_satellites_catalog.py -q   # offline catalog gate
+& ".venv/Scripts/python.exe" -m pytest tests/ -q                             # full suite
+```
+
+`test_satellites_catalog.py` validates the real catalog (schema, whitelists, uniqueness, dates, bands, crs/transform) and re-checks the grid gate with the REAL predicate from `src.interface.main_panel`. Both commands must be green before delivery. When presenting, briefly note:
 - Total number of bands extracted.
 - Any fields that were omitted and why (e.g. "`min`/`max` omitted — not provided by source").
-- Any structural decisions made (e.g. `cadence` added, `isHourly` omitted).
+- Any structural decisions made (e.g. `cadence` added, `isHourly` omitted, grid metadata written or intentionally left out).
+
 ---
  
 ## Edge cases
  
 - **Multiple pixel sizes**: If different bands have different pixel sizes, use the most common value for the top-level `pixelSize` field and note the exception in the affected band's `description`.
 - **Dataset with no bands table**: Some catalog pages list parameters in prose rather than a table. Extract them manually with the same schema.
-- **Masks / non-satellite datasets**: The same schema applies. Do not add a `masks` wrapper — that is handled separately in the user's file.
+- **Masks / non-satellite datasets**: The same schema applies. Do not add a `masks` wrapper in the entry file — insert into the right array with `add_satellite.py --section masks` instead. Masks accept only `endDate` and `filters` as optional keys (no `crs`/`transform`).
 - **URL already ends in `.md.txt`**: Fetch directly, no modification needed.

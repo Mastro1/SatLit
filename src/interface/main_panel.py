@@ -21,7 +21,9 @@ from src.interface.map_utils import (
     create_base_map, add_geojson_overlay, add_markers, render_map,
     render_map_display, gdf_to_geojson, extract_gadm_display_columns,
     fetch_gadm_boundaries, create_points_feature_group,
+    add_pixel_grid_overlay,
 )
+from src.infrastructure.utils.grid_utils import generate_pixel_grid_geojson
 from src.infrastructure.utils.maps_url_parser import (
     parse_google_maps_url, is_google_maps_url,
 )
@@ -51,6 +53,36 @@ def load_satellites():
             data = json.load(f)
             return data.get('satellites', [])
     return []
+
+
+def active_satellite_supports_grid(satellite=None):
+    """True iff the active dataset has a native crs+transform and pixelSize>=1000m."""
+    if satellite is None:
+        satellite = st.session_state.get('selected_satellite')
+    if not satellite:
+        return False
+    transform = satellite.get('transform')
+    return bool(
+        satellite.get('crs')
+        and transform and len(transform) == 6
+        and satellite.get('pixelSize', 0) >= 1000
+    )
+
+
+def _maybe_add_pixel_grid(m, gdf):
+    """Viz-only pixel-grid overlay on a preview map. Silent skip on None,
+    toast on too_many_pixels; never breaks the ROI preview."""
+    try:
+        sat = st.session_state.selected_satellite
+        grid = generate_pixel_grid_geojson(gdf.geometry.unary_union, sat['crs'], sat['transform'])
+        if grid is None:
+            pass
+        elif grid.get("properties", {}).get("error") == "too_many_pixels":
+            st.toast(grid["properties"]["message"])
+        else:
+            add_pixel_grid_overlay(m, grid)
+    except Exception as grid_err:
+        st.toast(f"Pixel grid unavailable: {str(grid_err)[:100]}")
 
 
 def update_default_filename():
@@ -781,6 +813,13 @@ def render_shapefile_input():
         
         if st.session_state.get('import_preview_ready'):
             st.markdown("**Import Preview:**")
+            if geo_type != 'points' and active_satellite_supports_grid():
+                show_grid_import = st.checkbox(
+                    "Show pixel grid", value=False, key="show_grid_import"
+                )
+                st.caption("Display-only preview of this dataset's native pixels — no download or selection.")
+            else:
+                show_grid_import = False
             import_path = st.session_state.get('uploaded_shapefile', '')
             if import_path and os.path.exists(import_path):
                 try:
@@ -804,7 +843,10 @@ def render_shapefile_input():
                     else:
                         geojson_data = gdf_to_geojson(gdf)
                         add_geojson_overlay(m, geojson_data)
-                    
+
+                    if show_grid_import:
+                        _maybe_add_pixel_grid(m, gdf)
+
                     render_map_display(m, key="import_preview_map", fit_bounds=gdf.total_bounds)
                 except Exception as map_err:
                     st.warning(f"Map preview unavailable: {str(map_err)[:100]}")
@@ -914,7 +956,14 @@ def render_gadm_input():
                 
                 # Display map
                 st.markdown("**Boundary Preview:**")
-                
+                if active_satellite_supports_grid():
+                    show_grid_gadm = st.checkbox(
+                        "Show pixel grid", value=False, key="show_grid_gadm"
+                    )
+                    st.caption("Display-only preview of this dataset's native pixels — no download or selection.")
+                else:
+                    show_grid_gadm = False
+
                 try:
                     # Get centroid for map center
                     centroid = gdf.geometry.unary_union.centroid
@@ -945,7 +994,10 @@ def render_gadm_input():
                         tooltip_aliases=tooltip_aliases,
                         popup_fields=popup_fields,
                     )
-                    
+
+                    if show_grid_gadm:
+                        _maybe_add_pixel_grid(m, gdf)
+
                     # Render map
                     render_map_display(m, key="gadm_map", fit_bounds=gdf.total_bounds)
                     

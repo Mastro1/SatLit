@@ -49,6 +49,7 @@ This tool is especially useful for:
 - **Desktop Shortcut**: Create or recreate the SatLit desktop launcher anytime from Settings (in addition to the one-time first-run prompt).
 - **GEE Task Monitor**: Refresh recent Earth Engine tasks in the sidebar, with a direct link to the [GEE Task Manager](https://code.earthengine.google.com/tasks).
 - **Live Map Verification**: Automated geometry and map rendering to visually confirm your ROI before submitting a job.
+- **Pixel Grid Preview**: For supported climate datasets, overlay the exact native satellite pixels on shapefile/GADM previews (display-only; no download or selection).
 - **Auto-Update**: On startup the app checks for a new version on GitHub. If one is available, a banner appears in the sidebar — one click pulls the latest changes and restarts the app in place.
 
 ---
@@ -62,6 +63,7 @@ This tool is especially useful for:
 | Precipitation | High-resolution rainfall | CHIRPS Daily |
 | Precipitation | Near-real-time global rain | GPM IMERG V07 (30-Min) |
 | Soil Moisture | Surface & root-zone soil moisture, temp, fluxes | SMAP SPL4SMGP v008 (3-Hourly) |
+| Atmosphere | Aerosol optical depth, cirrus fraction, cloud optical thickness | MODIS MOD08_M3 V6.1 (Monthly) |
 
 > More datasets are planned — see the [Roadmap](#-roadmap).
 

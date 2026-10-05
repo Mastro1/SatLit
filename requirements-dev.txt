@@ -1,0 +1,2 @@
+# Development-only dependencies. Production deps live in requirements.txt.
+pytest==9.1.1

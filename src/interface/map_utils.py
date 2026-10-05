@@ -5,6 +5,7 @@ Provides reusable functions for creating Folium maps with consistent
 base layers, overlays, rendering via st_folium, and drag-to-resize.
 """
 import folium
+import hashlib
 import json
 from jinja2 import Template
 from streamlit_folium import st_folium
@@ -29,6 +30,13 @@ DEFAULT_HIGHLIGHT = {
     'color': '#ffcc00',
     'weight': 3,
     'fillOpacity': 0.6,
+}
+
+GRID_STYLE = {
+    'fillColor': 'rgba(0,0,0,0)',
+    'color': '#2563EB',
+    'weight': 1,
+    'fillOpacity': 0.0,
 }
 
 
@@ -141,6 +149,64 @@ def add_geojson_overlay(m, geojson_data, style=None, highlight=None,
     return geojson_layer
 
 
+class ZoomVisibilityPlugin(folium.MacroElement):
+    """Folium plugin to control visibility of a layer based on the map's zoom level."""
+    def __init__(self, layer_name, min_zoom):
+        super().__init__()
+        self._name = 'ZoomVisibilityPlugin'
+        self._layer_name = layer_name
+        self._min_zoom = min_zoom
+        self._template = Template("""
+        {% macro script(this, kwargs) %}
+        (function() {
+            var map = {{this._parent.get_name()}};
+            var layer = {{this._layer_name}};
+
+            function checkZoom() {
+                var zoom = map.getZoom();
+                if (zoom < {{this._min_zoom}}) {
+                    if (map.hasLayer(layer)) {
+                        map.removeLayer(layer);
+                    }
+                } else {
+                    if (!map.hasLayer(layer)) {
+                        map.addLayer(layer);
+                    }
+                }
+            }
+
+            map.on('zoomend', checkZoom);
+            // Run initially
+            checkZoom();
+        })();
+        {% endmacro %}
+        """)
+
+
+def add_pixel_grid_overlay(m, grid_geojson, min_zoom=8):
+    """Add a viz-only pixel-grid overlay to a Folium map.
+
+    Args:
+        m: folium.Map to add the layer to.
+        grid_geojson: GeoJSON dict of grid cells (with col_row properties).
+        min_zoom: Minimum zoom at which the layer stays visible.
+            None disables the zoom gate.
+
+    Returns:
+        The folium.GeoJson layer added to the map.
+    """
+    layer = folium.GeoJson(
+        grid_geojson,
+        style_function=lambda x: GRID_STYLE,
+        control=True,
+        name="Pixel grid",
+    )
+    layer.add_to(m)
+    if min_zoom is not None:
+        ZoomVisibilityPlugin(layer.get_name(), min_zoom).add_to(m)
+    return layer
+
+
 def add_markers(m, points, color='red', icon='info-sign', label_format=None):
     """Add point markers to a Folium map.
 
@@ -214,6 +280,221 @@ def create_points_feature_group(points, color='red', icon='info-sign', label_for
 
 # --- Internal finalizer (deduplicates render_map / render_map_display) ---
 
+def roi_view_hash(fit_bounds) -> str:
+    """Stable short hash for an ROI bounds vector.
+
+    Args:
+        fit_bounds: [minx, miny, maxx, maxy] bounds vector.
+
+    Returns:
+        Short stable string: 4-decimal-joined bounds + 8-hex digest.
+        Identical bounds -> identical string; any change visible at
+        4 decimals -> different string. Float noise below 1e-9 rounds
+        away, so rerun float wobble never invalidates a stored view.
+    """
+    vals = [f"{float(v):.4f}" for v in fit_bounds]
+    joined = ",".join(vals)
+    digest = hashlib.sha1(joined.encode("utf-8")).hexdigest()[:8]
+    return f"{joined}-{digest}"
+
+
+class ViewPersistencePlugin(folium.MacroElement):
+    """Persist pan/zoom/basemap across Streamlit reruns via localStorage.
+
+    Client-side only: on ``moveend`` the view (center, zoom, base layer)
+    is stored under ``folium_view_<map_key>`` tagged with the ROI hash;
+    on init the stored view is restored ONLY when its hash matches the
+    current ROI (``stored.hash === roi_hash``), so a new shapefile/GADM
+    selection always falls back to today's fit-to-shape behavior.
+    All localStorage access is try/caught (private mode) and all map
+    access is guarded — any failure silently no-ops.
+    """
+    # ponytail: localStorage only {hash, center, zoom, baselayer} — no ROI geometry, no cross-tab sync. Add BroadcastChannel if multi-tab live-sync needed.
+    _template = Template("""
+    {% macro script(this, kwargs) %}
+    (function() {
+        try {
+            var map = {{this._parent.get_name()}};
+            if (!map) return;
+
+            var LS_KEY = 'folium_view_{{this._map_key}}';
+            var ROI_HASH = '{{this._roi_hash}}';
+            var KNOWN_BASES = ['Satellite', 'Streets'];
+            var currentBase = null;
+            // Public hook: folium renders TileLayer `attr` into L.tileLayer
+            // options.attribution (create_base_map: "Esri" / "OpenStreetMap");
+            // it never emits a `name` key, so options.name can never match.
+            var BASE_ATTR = {Satellite: 'Esri', Streets: 'OpenStreetMap'};
+            var seenLayers = {};
+
+            function loadView() {
+                try {
+                    var raw = window.localStorage.getItem(LS_KEY);
+                    if (!raw) return null;
+                    return JSON.parse(raw);
+                } catch (e) {
+                    return null;
+                }
+            }
+
+            function saveView(view) {
+                try {
+                    window.localStorage.setItem(LS_KEY, JSON.stringify(view));
+                } catch (e) {
+                    // quota or access denied — silently ignore
+                }
+            }
+
+            function baseLayerByName(name) {
+                var found = null;
+                try {
+                    if (seenLayers[name]) return seenLayers[name];
+                } catch (e) {}
+                var want = null;
+                try {
+                    want = BASE_ATTR[name] || null;
+                } catch (e) {}
+                try {
+                    map.eachLayer(function(l) {
+                        try {
+                            if (l && l.options && want && l.options.attribution === want) found = l;
+                        } catch (e) {}
+                    });
+                } catch (e) {}
+                return found;
+            }
+
+            function activateBaseViaControl(name) {
+                // Cold-start fallback: folium only .addTo()s the active base,
+                // so the inactive layer object is invisible to eachLayer —
+                // click its LayerControl radio instead (fires baselayerchange,
+                // which persists via the store path below).
+                try {
+                    var base = document.querySelector('.leaflet-control-layers-base');
+                    if (!base) return false;
+                    var labels = base.getElementsByTagName('label');
+                    for (var k = 0; k < labels.length; k++) {
+                        var txt = labels[k].textContent || '';
+                        if (txt.indexOf(name) === -1) continue;
+                        var input = labels[k].querySelector('input');
+                        if (input && !input.checked) input.click();
+                        try { currentBase = name; } catch (e2) {}
+                        return true;
+                    }
+                } catch (e) {}
+                return false;
+            }
+
+            function activateBase(name) {
+                if (!name) return;
+                var known = false;
+                for (var i = 0; i < KNOWN_BASES.length; i++) {
+                    if (KNOWN_BASES[i] === name) { known = true; break; }
+                }
+                if (!known) return;
+                var target = baseLayerByName(name);
+                if (!target) { activateBaseViaControl(name); return; }
+                try {
+                    for (var j = 0; j < KNOWN_BASES.length; j++) {
+                        if (KNOWN_BASES[j] === name) continue;
+                        var other = baseLayerByName(KNOWN_BASES[j]);
+                        if (other && map.hasLayer(other)) map.removeLayer(other);
+                    }
+                    if (!map.hasLayer(target)) map.addLayer(target);
+                    currentBase = name;
+                } catch (e) {}
+            }
+
+            function readCenter() {
+                try {
+                    var c = map.getCenter();
+                    if (!c) return null;
+                    return [c.lat, c.lng];
+                } catch (e) {
+                    return null;
+                }
+            }
+
+            function readZoom() {
+                try {
+                    return map.getZoom();
+                } catch (e) {
+                    return null;
+                }
+            }
+
+            function persistView() {
+                try {
+                    var center = readCenter();
+                    var zoom = readZoom();
+                    if (!center || zoom === null || zoom === undefined) return;
+                    var base = currentBase;
+                    if (!base) {
+                        try {
+                            var stored = loadView();
+                            if (stored && stored.baselayer) base = stored.baselayer;
+                        } catch (e) {}
+                    }
+                    saveView({hash: ROI_HASH, center: center, zoom: zoom, baselayer: base});
+                } catch (e) {}
+            }
+
+            function restoreView() {
+                try {
+                    var stored = loadView();
+                    if (!stored) return;
+                    if (stored.hash !== ROI_HASH) return;
+                    if (stored.center && (stored.zoom !== null && stored.zoom !== undefined)) {
+                        try {
+                            map.setView(stored.center, stored.zoom);
+                        } catch (e) {}
+                    }
+                    if (stored.baselayer) activateBase(stored.baselayer);
+                } catch (e) {}
+            }
+
+            try {
+                map.on('moveend', function() { persistView(); });
+            } catch (e) {}
+            try {
+                map.on('baselayerchange', function(e) {
+                    try {
+                        var n = e && e.name;
+                        if (!n) return;
+                        currentBase = n;
+                        // e.name is the LayerControl label ("Satellite"/"Streets",
+                        // exactly the base_layers keys folium renders) — reliable,
+                        // so the store path stays as-is. Cache the public layer
+                        // object for warm lookups.
+                        try { if (e.layer) seenLayers[n] = e.layer; } catch (err2) {}
+                        var center = readCenter();
+                        var zoom = readZoom();
+                        if (!center || zoom === null || zoom === undefined) return;
+                        saveView({hash: ROI_HASH, center: center, zoom: zoom, baselayer: n});
+                    } catch (err) {}
+                });
+            } catch (e) {}
+
+            // Restore AFTER any baked-in fitBounds so the stored view wins.
+            try {
+                if (map.whenReady) {
+                    map.whenReady(function() { setTimeout(restoreView, 0); });
+                } else {
+                    setTimeout(restoreView, 0);
+                }
+            } catch (e) {}
+        } catch (e) {}
+    })();
+    {% endmacro %}
+    """)
+
+    def __init__(self, map_key, roi_hash):
+        super().__init__()
+        self._name = 'ViewPersistencePlugin'
+        self._map_key = map_key
+        self._roi_hash = roi_hash
+
+
 def _finalize(m, key, fit_bounds, add_layer_control=True):
     """Shared finalizer: fit bounds, add controls, attach drag handle.
 
@@ -228,6 +509,8 @@ def _finalize(m, key, fit_bounds, add_layer_control=True):
     if add_layer_control:
         folium.LayerControl(position="topright", collapsed=False).add_to(m)
     DragHandlePlugin(map_key=key).add_to(m)
+    if fit_bounds is not None:
+        ViewPersistencePlugin(map_key=key, roi_hash=roi_view_hash(fit_bounds)).add_to(m)
     return m
 
 
