@@ -12,7 +12,7 @@ import json
 from pathlib import Path
 import os
 import threading
-from datetime import datetime
+from datetime import datetime, date, timedelta
 
 from src.infrastructure.configuration.SettingsService import SettingsService
 from src.application.services.GeometryService import GeometryService
@@ -39,6 +39,27 @@ _REDUCERS = {
     'median': ee.Reducer.median,
     'first': ee.Reducer.first,
 }
+
+
+def _doy_label(doy: int) -> str:
+    """DOY -> '15 Aug' on a non-leap reference year (2001)."""
+    # ponytail: fixed non-leap mapping, so in leap years days after Feb land
+    # 1 day earlier (15 Aug -> 14 Aug). Store month/day + per-year filterDate
+    # ranges if exact calendar days ever matter.
+    return (date(2001, 1, 1) + timedelta(days=doy - 1)).strftime("%d %b")
+
+
+def _doy_ranges(start_doy: int, end_doy: int) -> list:
+    """DOY window -> inclusive dayOfYear ranges. End 365 (31 Dec) also
+    takes DOY 366 so leap-year 31 Dec is not dropped."""
+    def _hi(d):
+        return 366 if d == 365 else d
+    if start_doy <= end_doy:
+        return [(start_doy, _hi(end_doy))]
+    return [(start_doy, 366), (1, end_doy)]  # cross-year season
+
+
+_DOYS = list(range(1, 366))
 
 
 def load_satellites():
@@ -1080,20 +1101,22 @@ def render_time_section(loaded_settings: dict):
         end_doy = 365
         
         if use_season:
+            # Day-month labels ("15 Aug"); values stay DOY ints, so presets,
+            # history and the extraction filter are unchanged.
             col1, col2 = st.columns(2)
             with col1:
-                start_doy = st.slider(
-                    "Start DOY",
-                    min_value=1,
-                    max_value=365,
+                start_doy = st.select_slider(
+                    "Start Day",
+                    options=_DOYS,
+                    format_func=_doy_label,
                     **({} if "form_start_doy" in st.session_state else {"value": st.session_state.get('start_doy', loaded_settings.get('dates', {}).get('start_doy', 1))}),
                     key="form_start_doy"
                 )
             with col2:
-                end_doy = st.slider(
-                    "End DOY",
-                    min_value=1,
-                    max_value=365,
+                end_doy = st.select_slider(
+                    "End Day",
+                    options=_DOYS,
+                    format_func=_doy_label,
                     **({} if "form_end_doy" in st.session_state else {"value": st.session_state.get('end_doy', loaded_settings.get('dates', {}).get('end_doy', 365))}),
                     key="form_end_doy"
                 )
@@ -1308,7 +1331,9 @@ def run_extraction(settings_service: SettingsService, export_method: str):
             
             # Apply date filters
             start_date = f"{date_config['start_year']}-01-01"
-            end_date = f"{date_config['end_year']}-12-31"
+            # filterDate end is exclusive: 1 Jan of the next year keeps
+            # 31 Dec of the End Year.
+            end_date = f"{int(date_config['end_year']) + 1}-01-01"
             collection = collection.filterDate(start_date, end_date)
             
             # Apply DOY filter if not full year
@@ -1316,18 +1341,11 @@ def run_extraction(settings_service: SettingsService, export_method: str):
                 start_doy = date_config['start_doy']
                 end_doy = date_config['end_doy']
                 
-                if start_doy <= end_doy:
-                    # Normal season
-                    collection = collection.filter(ee.Filter.dayOfYear(start_doy, end_doy))
-                else:
-                    # Cross-year season
-                    collection = collection.filter(
-                        ee.Filter.Or(
-                            ee.Filter.dayOfYear(start_doy, 365),
-                            ee.Filter.dayOfYear(1, end_doy)
-                        )
-                    )
-            
+                _filters = [ee.Filter.dayOfYear(lo, hi)
+                            for lo, hi in _doy_ranges(start_doy, end_doy)]
+                collection = collection.filter(
+                    _filters[0] if len(_filters) == 1 else ee.Filter.Or(*_filters))
+
             # Filter by bounds
             collection = collection.filterBounds(geometry)
             
