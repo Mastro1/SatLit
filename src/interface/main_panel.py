@@ -12,7 +12,7 @@ import json
 from pathlib import Path
 import os
 import threading
-from datetime import datetime
+from datetime import datetime, date, timedelta
 
 from src.infrastructure.configuration.SettingsService import SettingsService
 from src.application.services.GeometryService import GeometryService
@@ -39,6 +39,27 @@ _REDUCERS = {
     'median': ee.Reducer.median,
     'first': ee.Reducer.first,
 }
+
+
+def _doy_label(doy: int) -> str:
+    """DOY -> '15 Aug' on a non-leap reference year (2001)."""
+    # ponytail: fixed non-leap mapping, so in leap years days after Feb land
+    # 1 day earlier (15 Aug -> 14 Aug). Store month/day + per-year filterDate
+    # ranges if exact calendar days ever matter.
+    return (date(2001, 1, 1) + timedelta(days=doy - 1)).strftime("%d %b")
+
+
+def _doy_ranges(start_doy: int, end_doy: int) -> list:
+    """DOY window -> inclusive dayOfYear ranges. End 365 (31 Dec) also
+    takes DOY 366 so leap-year 31 Dec is not dropped."""
+    def _hi(d):
+        return 366 if d == 365 else d
+    if start_doy <= end_doy:
+        return [(start_doy, _hi(end_doy))]
+    return [(start_doy, 366), (1, end_doy)]  # cross-year season
+
+
+_DOYS = list(range(1, 366))
 
 
 def load_satellites():
@@ -417,28 +438,18 @@ def render_data_source_section(satellites: list, loaded_settings: dict):
         
         band_names = [b['name'] for b in bands]
         
-        # Default bands from loaded settings
-        default_bands = loaded_settings.get('bands', [])
-        default_selections = [b for b in band_names if b in default_bands] or band_names[:1]
-        _ms_default = default_selections if any(b in band_names for b in default_selections) else []
-
-        # Session state drives when it holds valid bands; otherwise default
-        # applies. Stale bands from another dataset fall back to default.
-        _ms_session = st.session_state.get("band_multiselect") or []
-        if _ms_session and all(b in band_names for b in _ms_session):
-            selected_bands = st.multiselect(
-                "Select bands to extract",
-                options=band_names,
-                key="band_multiselect"
-            )
-        else:
-            st.session_state.pop("band_multiselect", None)
-            selected_bands = st.multiselect(
-                "Select bands to extract",
-                options=band_names,
-                default=_ms_default,
-                key="band_multiselect"
-            )
+        # Unset or stale (another dataset's) bands reset to loaded settings,
+        # else the first band. Assign, don't pop/default=: the widget's
+        # identity is its key, so only an assignment reaches the frontend.
+        _ms_session = st.session_state.get("band_multiselect")
+        if _ms_session is None or not all(b in band_names for b in _ms_session):
+            default_bands = loaded_settings.get('bands', [])
+            st.session_state.band_multiselect = [b for b in band_names if b in default_bands] or band_names[:1]
+        selected_bands = st.multiselect(
+            "Select bands to extract",
+            options=band_names,
+            key="band_multiselect"
+        )
         
         # For each selected band, show reducer option
         if selected_bands:
@@ -1090,20 +1101,22 @@ def render_time_section(loaded_settings: dict):
         end_doy = 365
         
         if use_season:
+            # Day-month labels ("15 Aug"); values stay DOY ints, so presets,
+            # history and the extraction filter are unchanged.
             col1, col2 = st.columns(2)
             with col1:
-                start_doy = st.slider(
-                    "Start DOY",
-                    min_value=1,
-                    max_value=365,
+                start_doy = st.select_slider(
+                    "Start Day",
+                    options=_DOYS,
+                    format_func=_doy_label,
                     **({} if "form_start_doy" in st.session_state else {"value": st.session_state.get('start_doy', loaded_settings.get('dates', {}).get('start_doy', 1))}),
                     key="form_start_doy"
                 )
             with col2:
-                end_doy = st.slider(
-                    "End DOY",
-                    min_value=1,
-                    max_value=365,
+                end_doy = st.select_slider(
+                    "End Day",
+                    options=_DOYS,
+                    format_func=_doy_label,
                     **({} if "form_end_doy" in st.session_state else {"value": st.session_state.get('end_doy', loaded_settings.get('dates', {}).get('end_doy', 365))}),
                     key="form_end_doy"
                 )
@@ -1189,6 +1202,80 @@ def render_execution_section(settings_service: SettingsService, satellites: list
     if st.button("🚀 RUN EXTRACTION", type="primary", use_container_width=True):
         run_extraction(settings_service, export_method)
 
+    render_local_result()
+
+
+def _series_frame(df, band, loc_col=None, locs=None):
+    """Wide frame for st.line_chart: datetime index, one column per location.
+
+    pivot_table (mean) tolerates duplicate timestamps per location.
+    """
+    import pandas as pd
+
+    ts = df['date'] + (' ' + df['time'] if 'time' in df.columns else '')
+    data = df.assign(_ts=pd.to_datetime(ts))
+    if loc_col is None:
+        return data.groupby('_ts')[[band]].mean()
+    if locs is not None:
+        data = data[data[loc_col].isin(locs)]
+    return data.pivot_table(index='_ts', columns=loc_col, values=band)
+
+
+def render_local_result():
+    """Download, table preview and plot for the last local extraction."""
+    result = st.session_state.get('local_result')
+    if not result:
+        return
+    df = result['df']
+
+    st.download_button(
+        label="📥 Download CSV",
+        data=df.to_csv(index=False),
+        file_name=f"{result['name']}.csv",
+        mime="text/csv"
+    )
+
+    st.subheader("Data Preview")
+    bands = [b for b in result['bands'] if b in df.columns]
+    plottable = bool(bands) and 'date' in df.columns
+    run = result.get('run', 0)
+    # Radio over st.tabs: tabs can snap back to the first tab when a plot
+    # widget reruns the script; a keyed radio keeps the chosen view.
+    view = st.radio(
+        "View", ["📋 Table", "📈 Plot"] if plottable else ["📋 Table"],
+        horizontal=True, label_visibility="collapsed", key=f"result_view_{run}",
+    )
+    if view != "📈 Plot":
+        st.dataframe(df)  # all rows; default height scrolls
+        return
+
+    band = st.selectbox("Variable", bands, key=f"plot_band_{run}")
+    loc_col = next((c for c in ('point_id', 'feature_id') if c in df.columns), None)
+    locs = None
+    if loc_col:
+        all_locs = sorted(df[loc_col].dropna().unique().tolist())
+        locs = st.multiselect("Locations", all_locs, default=all_locs, key=f"plot_locs_{run}")
+        if not locs:
+            st.info("Select at least one location to plot.")
+            return
+
+    import altair as alt
+
+    units = result['units'].get(band, '')
+    long = (_series_frame(df, band, loc_col, locs).reset_index()
+            .melt(id_vars='_ts', var_name='location', value_name='value'))
+    # Altair over st.line_chart: line_chart forces a zero baseline, which
+    # flattens e.g. temperature in K. zero=False fits the y-axis to the data.
+    chart = alt.Chart(long).mark_line().encode(
+        x=alt.X('_ts:T', title='Date'),
+        y=alt.Y('value:Q', title=f"{band} ({units})" if units else band,
+                scale=alt.Scale(zero=False)),
+        color=alt.Color('location:N', title=loc_col or ''),
+        tooltip=[alt.Tooltip('_ts:T', title='Date'), 'location:N',
+                 alt.Tooltip('value:Q', title=band)],
+    ).interactive()
+    st.altair_chart(chart, width='stretch')
+
 
 def run_extraction(settings_service: SettingsService, export_method: str):
     """Execute the GEE extraction - outputs CSV with time-series data."""
@@ -1244,7 +1331,9 @@ def run_extraction(settings_service: SettingsService, export_method: str):
             
             # Apply date filters
             start_date = f"{date_config['start_year']}-01-01"
-            end_date = f"{date_config['end_year']}-12-31"
+            # filterDate end is exclusive: 1 Jan of the next year keeps
+            # 31 Dec of the End Year.
+            end_date = f"{int(date_config['end_year']) + 1}-01-01"
             collection = collection.filterDate(start_date, end_date)
             
             # Apply DOY filter if not full year
@@ -1252,18 +1341,11 @@ def run_extraction(settings_service: SettingsService, export_method: str):
                 start_doy = date_config['start_doy']
                 end_doy = date_config['end_doy']
                 
-                if start_doy <= end_doy:
-                    # Normal season
-                    collection = collection.filter(ee.Filter.dayOfYear(start_doy, end_doy))
-                else:
-                    # Cross-year season
-                    collection = collection.filter(
-                        ee.Filter.Or(
-                            ee.Filter.dayOfYear(start_doy, 365),
-                            ee.Filter.dayOfYear(1, end_doy)
-                        )
-                    )
-            
+                _filters = [ee.Filter.dayOfYear(lo, hi)
+                            for lo, hi in _doy_ranges(start_doy, end_doy)]
+                collection = collection.filter(
+                    _filters[0] if len(_filters) == 1 else ee.Filter.Or(*_filters))
+
             # Filter by bounds
             collection = collection.filterBounds(geometry)
             
@@ -1431,6 +1513,7 @@ def run_extraction(settings_service: SettingsService, export_method: str):
                 # Local download - get as CSV directly
                 # Note: This may fail for very large datasets
                 st.info("Fetching data... This may take a moment for large datasets.")
+                st.session_state.pop('local_result', None)
                 
                 try:
                     # Get the data directly (limited to ~5000 features)
@@ -1455,19 +1538,20 @@ def run_extraction(settings_service: SettingsService, export_method: str):
                                        if c in df.columns]
                         df = df[_final_cols]
 
-                        # Provide download button
-                        csv_data = df.to_csv(index=False)
+                        # Kept in session state so plot widgets can rerun
+                        # without losing the result (rendered by
+                        # render_local_result, outside the button branch).
+                        st.session_state['local_result'] = {
+                            'df': df,
+                            'name': task_name,
+                            'bands': selected_bands,
+                            'units': {b['name']: b.get('units', '')
+                                      for b in selected_satellite.get('bands', [])},
+                            # Fresh plot-widget keys per result, so each run
+                            # starts with all locations selected.
+                            'run': datetime.now().timestamp(),
+                        }
                         st.success("✅ Data extracted successfully!")
-                        st.download_button(
-                            label="📥 Download CSV",
-                            data=csv_data,
-                            file_name=f"{task_name}.csv",
-                            mime="text/csv"
-                        )
-                        
-                        # Show preview
-                        st.subheader("Data Preview")
-                        st.dataframe(df.head(20))
                     else:
                         st.warning("No data returned. Try adjusting filters or using Drive export for large datasets.")
                         
