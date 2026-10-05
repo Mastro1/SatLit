@@ -417,28 +417,18 @@ def render_data_source_section(satellites: list, loaded_settings: dict):
         
         band_names = [b['name'] for b in bands]
         
-        # Default bands from loaded settings
-        default_bands = loaded_settings.get('bands', [])
-        default_selections = [b for b in band_names if b in default_bands] or band_names[:1]
-        _ms_default = default_selections if any(b in band_names for b in default_selections) else []
-
-        # Session state drives when it holds valid bands; otherwise default
-        # applies. Stale bands from another dataset fall back to default.
-        _ms_session = st.session_state.get("band_multiselect") or []
-        if _ms_session and all(b in band_names for b in _ms_session):
-            selected_bands = st.multiselect(
-                "Select bands to extract",
-                options=band_names,
-                key="band_multiselect"
-            )
-        else:
-            st.session_state.pop("band_multiselect", None)
-            selected_bands = st.multiselect(
-                "Select bands to extract",
-                options=band_names,
-                default=_ms_default,
-                key="band_multiselect"
-            )
+        # Unset or stale (another dataset's) bands reset to loaded settings,
+        # else the first band. Assign, don't pop/default=: the widget's
+        # identity is its key, so only an assignment reaches the frontend.
+        _ms_session = st.session_state.get("band_multiselect")
+        if _ms_session is None or not all(b in band_names for b in _ms_session):
+            default_bands = loaded_settings.get('bands', [])
+            st.session_state.band_multiselect = [b for b in band_names if b in default_bands] or band_names[:1]
+        selected_bands = st.multiselect(
+            "Select bands to extract",
+            options=band_names,
+            key="band_multiselect"
+        )
         
         # For each selected band, show reducer option
         if selected_bands:
