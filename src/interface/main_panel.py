@@ -1179,6 +1179,80 @@ def render_execution_section(settings_service: SettingsService, satellites: list
     if st.button("🚀 RUN EXTRACTION", type="primary", use_container_width=True):
         run_extraction(settings_service, export_method)
 
+    render_local_result()
+
+
+def _series_frame(df, band, loc_col=None, locs=None):
+    """Wide frame for st.line_chart: datetime index, one column per location.
+
+    pivot_table (mean) tolerates duplicate timestamps per location.
+    """
+    import pandas as pd
+
+    ts = df['date'] + (' ' + df['time'] if 'time' in df.columns else '')
+    data = df.assign(_ts=pd.to_datetime(ts))
+    if loc_col is None:
+        return data.groupby('_ts')[[band]].mean()
+    if locs is not None:
+        data = data[data[loc_col].isin(locs)]
+    return data.pivot_table(index='_ts', columns=loc_col, values=band)
+
+
+def render_local_result():
+    """Download, table preview and plot for the last local extraction."""
+    result = st.session_state.get('local_result')
+    if not result:
+        return
+    df = result['df']
+
+    st.download_button(
+        label="📥 Download CSV",
+        data=df.to_csv(index=False),
+        file_name=f"{result['name']}.csv",
+        mime="text/csv"
+    )
+
+    st.subheader("Data Preview")
+    bands = [b for b in result['bands'] if b in df.columns]
+    plottable = bool(bands) and 'date' in df.columns
+    run = result.get('run', 0)
+    # Radio over st.tabs: tabs can snap back to the first tab when a plot
+    # widget reruns the script; a keyed radio keeps the chosen view.
+    view = st.radio(
+        "View", ["📋 Table", "📈 Plot"] if plottable else ["📋 Table"],
+        horizontal=True, label_visibility="collapsed", key=f"result_view_{run}",
+    )
+    if view != "📈 Plot":
+        st.dataframe(df)  # all rows; default height scrolls
+        return
+
+    band = st.selectbox("Variable", bands, key=f"plot_band_{run}")
+    loc_col = next((c for c in ('point_id', 'feature_id') if c in df.columns), None)
+    locs = None
+    if loc_col:
+        all_locs = sorted(df[loc_col].dropna().unique().tolist())
+        locs = st.multiselect("Locations", all_locs, default=all_locs, key=f"plot_locs_{run}")
+        if not locs:
+            st.info("Select at least one location to plot.")
+            return
+
+    import altair as alt
+
+    units = result['units'].get(band, '')
+    long = (_series_frame(df, band, loc_col, locs).reset_index()
+            .melt(id_vars='_ts', var_name='location', value_name='value'))
+    # Altair over st.line_chart: line_chart forces a zero baseline, which
+    # flattens e.g. temperature in K. zero=False fits the y-axis to the data.
+    chart = alt.Chart(long).mark_line().encode(
+        x=alt.X('_ts:T', title='Date'),
+        y=alt.Y('value:Q', title=f"{band} ({units})" if units else band,
+                scale=alt.Scale(zero=False)),
+        color=alt.Color('location:N', title=loc_col or ''),
+        tooltip=[alt.Tooltip('_ts:T', title='Date'), 'location:N',
+                 alt.Tooltip('value:Q', title=band)],
+    ).interactive()
+    st.altair_chart(chart, width='stretch')
+
 
 def run_extraction(settings_service: SettingsService, export_method: str):
     """Execute the GEE extraction - outputs CSV with time-series data."""
@@ -1421,6 +1495,7 @@ def run_extraction(settings_service: SettingsService, export_method: str):
                 # Local download - get as CSV directly
                 # Note: This may fail for very large datasets
                 st.info("Fetching data... This may take a moment for large datasets.")
+                st.session_state.pop('local_result', None)
                 
                 try:
                     # Get the data directly (limited to ~5000 features)
@@ -1445,19 +1520,20 @@ def run_extraction(settings_service: SettingsService, export_method: str):
                                        if c in df.columns]
                         df = df[_final_cols]
 
-                        # Provide download button
-                        csv_data = df.to_csv(index=False)
+                        # Kept in session state so plot widgets can rerun
+                        # without losing the result (rendered by
+                        # render_local_result, outside the button branch).
+                        st.session_state['local_result'] = {
+                            'df': df,
+                            'name': task_name,
+                            'bands': selected_bands,
+                            'units': {b['name']: b.get('units', '')
+                                      for b in selected_satellite.get('bands', [])},
+                            # Fresh plot-widget keys per result, so each run
+                            # starts with all locations selected.
+                            'run': datetime.now().timestamp(),
+                        }
                         st.success("✅ Data extracted successfully!")
-                        st.download_button(
-                            label="📥 Download CSV",
-                            data=csv_data,
-                            file_name=f"{task_name}.csv",
-                            mime="text/csv"
-                        )
-                        
-                        # Show preview
-                        st.subheader("Data Preview")
-                        st.dataframe(df.head(20))
                     else:
                         st.warning("No data returned. Try adjusting filters or using Drive export for large datasets.")
                         
