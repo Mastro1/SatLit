@@ -63,6 +63,7 @@ This tool is especially useful for:
 | Precipitation | High-resolution rainfall | CHIRPS Daily |
 | Precipitation | Near-real-time global rain | GPM IMERG V07 (30-Min) |
 | Soil Moisture | Surface & root-zone soil moisture, temp, fluxes | SMAP SPL4SMGP v008 (3-Hourly) |
+| Atmosphere | Aerosol optical depth, cirrus fraction, cloud optical thickness | MODIS MOD08_M3 V6.1 (Monthly) |
 
 > More datasets are planned — see the [Roadmap](#-roadmap).
 
