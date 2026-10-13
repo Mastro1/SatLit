@@ -27,6 +27,9 @@ CONFIG_KEYS = (
     "custom_filename",
     "shapefile_required",
     "num_points",
+    # Added after schema v1 shipped: optional, older app versions drop them.
+    "simplify_tolerance",
+    "feature_id_column",
 )
 
 STRIP_FROM_CONFIG = {
@@ -56,11 +59,13 @@ def sanitize_filename(name: str) -> str:
     return cleaned[:80] or "preset"
 
 
-def config_from_history_or_session(entry: dict) -> dict:
+def config_from_history_or_session(entry: dict, keep_path: bool = False) -> dict:
     """
     Build a portable preset config from a history entry or session snapshot.
 
-    Never keeps absolute shapefile paths. Marks shapefile_required when ROI is Shapefile.
+    Marks shapefile_required when ROI is Shapefile. Absolute shapefile paths
+    are dropped unless keep_path (local preset library on this machine);
+    share payloads never carry them.
     """
     if not isinstance(entry, dict):
         raise PresetValidationError("Config must be an object.")
@@ -81,7 +86,7 @@ def config_from_history_or_session(entry: dict) -> dict:
         if key in source:
             config[key] = source[key]
 
-    config.pop("uploaded_shapefile", None)
+    shapefile_path = source.get("uploaded_shapefile") if keep_path else None
 
     if "satellite" not in config or not config["satellite"]:
         raise PresetValidationError("A preset needs a satellite.")
@@ -133,6 +138,9 @@ def config_from_history_or_session(entry: dict) -> dict:
         if key in STRIP_FROM_CONFIG or key not in CONFIG_KEYS:
             if key not in CONFIG_KEYS:
                 config.pop(key, None)
+
+    if shapefile_path:
+        config["uploaded_shapefile"] = shapefile_path
 
     return config
 

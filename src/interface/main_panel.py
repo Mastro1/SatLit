@@ -120,13 +120,28 @@ def _simplify_label(tol):
     return f"{tol:g}° ({approx})"
 
 
+def _snap_tolerance(tol):
+    """Nearest SIMPLIFY_STEPS entry (hand-edited/odd preset values must not crash the slider)."""
+    try:
+        tol = float(tol)
+    except (TypeError, ValueError):
+        return 0.0
+    return min(SIMPLIFY_STEPS, key=lambda s: abs(s - tol))
+
+
 def _simplify_slider(key, default):
-    """Shape simplification tolerance (degrees), shared by map preview and GEE extraction."""
-    return st.select_slider(
+    """Shape simplification tolerance (degrees), shared by map preview and GEE extraction.
+
+    ``key`` is a durable session key (read by extraction/snapshots); the widget
+    uses ``_w_<key>``, because Streamlit drops widget keys whenever the widget
+    isn't rendered (tab switch, preview closed)."""
+    wkey = f"_w_{key}"
+    if wkey not in st.session_state:
+        st.session_state[wkey] = _snap_tolerance(st.session_state.get(key, default))
+    tol = st.select_slider(
         "Shape simplification",
         options=SIMPLIFY_STEPS,
-        value=default,
-        key=key,
+        key=wkey,
         format_func=_simplify_label,
         help="Maximum distance (in degrees) a simplified vertex may deviate from the original shape. "
              "The same value is used for this preview and for the extraction in GEE.\n\n"
@@ -136,6 +151,14 @@ def _simplify_slider(key, default):
              "**Off** → exact geometry, slower for complex shapes.\n\n"
              "[Learn more](https://geopandas.org/en/stable/docs/reference/api/geopandas.GeoSeries.simplify.html)",
     )
+    st.session_state[key] = tol
+    return tol
+
+
+def _restore_tolerance(key, value, default):
+    """Apply a loaded tolerance (missing → default) and force the slider to re-seed."""
+    st.session_state[key] = _snap_tolerance(default if value is None else value)
+    st.session_state.pop(f"_w_{key}", None)
 
 
 def _map_controls(grid_key, simplify_key, simplify_default):
@@ -254,6 +277,7 @@ def snapshot_config_from_session() -> dict:
 
     # Only the active ROI source's data enters the snapshot; data parked in
     # inactive tabs stays in session state but is ignored here.
+    extra = {}
     if geometry_source == "Points":
         snap_points = st.session_state.get("selected_points") or []
         snap_gadm, snap_regions, snap_shapefile = {}, None, None
@@ -262,12 +286,18 @@ def snapshot_config_from_session() -> dict:
         snap_gadm = gadm_selection
         snap_regions = st.session_state.get("gadm_regions")
         snap_shapefile = None
+        extra["simplify_tolerance"] = st.session_state.get("simplify_tol_gadm", SIMPLIFY_DEFAULT_GADM)
     else:  # Shapefile
         snap_points = []
         snap_gadm, snap_regions = {}, None
         snap_shapefile = st.session_state.get("uploaded_shapefile")
+        extra["simplify_tolerance"] = st.session_state.get("simplify_tol_import", SIMPLIFY_DEFAULT_IMPORT)
+        id_col = st.session_state.get("feature_id_column")
+        if id_col and id_col != "(auto index)":
+            extra["feature_id_column"] = id_col
 
     return {
+        **extra,
         "satellite": sat_id,
         "bands": bands,
         "reducers": reducers,
@@ -354,12 +384,26 @@ def apply_loaded_settings():
         )
     elif shapefile_path:
         st.session_state.import_file_path = shapefile_path
+        st.session_state.imported_geodata = None
+        st.session_state.import_preview_ready = False
         if os.path.exists(shapefile_path):
-            st.session_state.uploaded_shapefile = shapefile_path
-            st.toast(f"✅ Restored shapefile: {os.path.basename(shapefile_path)}")
+            try:
+                # Same metadata the "Load File" button produces, so the success
+                # box, ID selector, preview map and per-feature extraction all work.
+                st.session_state.imported_geodata = GeometryService().parse_file(shapefile_path)
+                st.session_state.uploaded_shapefile = shapefile_path
+                st.session_state.feature_id_column = loaded.get('feature_id_column') or '(auto index)'
+                st.session_state.import_preview_ready = True
+                st.toast(f"✅ Restored shapefile: {os.path.basename(shapefile_path)}")
+            except ValueError as e:
+                st.session_state.uploaded_shapefile = None
+                st.warning(f"⚠️ Could not read restored file {shapefile_path}: {e}")
         else:
             st.session_state.uploaded_shapefile = None
             st.warning(f"⚠️ File path restored but not found on disk: {shapefile_path}")
+
+    if shapefile_required:
+        _restore_tolerance('simplify_tol_import', loaded.get('simplify_tolerance'), SIMPLIFY_DEFAULT_IMPORT)
 
     if loaded.get('gadm_selection'):
         st.session_state.gadm_selection = loaded['gadm_selection']
@@ -373,8 +417,11 @@ def apply_loaded_settings():
         st.session_state.gadm_gdf = None
         st.session_state.pop('gadm_map_visible', None)
 
-        if loaded.get('gadm_regions'):
-            st.session_state.gadm_regions = loaded['gadm_regions']
+        # Regions always come from the loaded config (stale ones would leak otherwise)
+        st.session_state.gadm_regions = list(loaded.get('gadm_regions') or [])
+        _restore_tolerance('simplify_tol_gadm', loaded.get('simplify_tolerance'), SIMPLIFY_DEFAULT_GADM)
+        # render_gadm_input loads boundaries + map in this same run
+        st.session_state._gadm_autoload = True
 
     # 5. Restore Time/Dates
     if loaded.get('dates'):
@@ -877,14 +924,12 @@ def render_shapefile_input():
         # --- Feature ID Column selector ---
         file_columns = imported.get('columns', [])
         id_options = ['(auto index)'] + file_columns
-        current_selection = st.session_state.get('feature_id_column', '(auto index)')
-        # Ensure the stored selection is still valid for the current file
-        if current_selection not in id_options:
-            current_selection = '(auto index)'
+        # Ensure the stored (possibly restored) selection is valid for the current file
+        if st.session_state.get('feature_id_column') not in id_options:
+            st.session_state.feature_id_column = '(auto index)'
         selected_id_col = st.selectbox(
             "Feature ID Column",
             options=id_options,
-            index=id_options.index(current_selection),
             key="feature_id_column",
             help="Choose which column to use as the feature identifier in the output CSV. "
                  "'(auto index)' uses a numeric 1, 2, 3… index."
@@ -986,8 +1031,8 @@ def render_gadm_input():
         country_changed = st.session_state.get('gadm_country_loaded') != country
         level_changed = st.session_state.get('gadm_level_loaded') != admin_level
         
-        if load_clicked:
-            # User explicitly requested a load — always proceed
+        # Explicit click, or a just-loaded preset/history entry (one-shot flag)
+        if load_clicked or st.session_state.pop('_gadm_autoload', False):
             try:
                 with st.spinner(f"Loading {country} boundaries..."):
                     gdf = fetch_gadm_boundaries(country, admin_level)
@@ -1030,11 +1075,15 @@ def render_gadm_input():
                     name_col = f"NAME_{loaded_level}"
                     if name_col in gdf.columns:
                         region_names = gdf[name_col].tolist()
-                        
+                        # Restored names missing from this boundary set would raise
+                        if "gadm_regions" in st.session_state:
+                            st.session_state.gadm_regions = [
+                                r for r in (st.session_state.gadm_regions or []) if r in region_names
+                            ]
+
                         selected_regions = st.multiselect(
                             f"Select specific regions (optional)",
                             options=region_names,
-                            default=[],
                             key="gadm_regions",
                             help="Leave empty to use entire country"
                         )
@@ -1560,32 +1609,20 @@ def run_extraction(settings_service: SettingsService, export_method: str):
                 st.info(f"**Output:** CSV file in Google Drive folder `{drive_folder}`")
                 st.markdown(f"📊 [View in GEE Console](https://code.earthengine.google.com/tasks)")
                 
-                # Save to history — only the active ROI source's fields are
-                # populated; inactive sources are stored empty (all history/
-                # preset readers use .get, so empty inactive fields are safe).
-                history_manager = HistoryManager()
-                is_points_roi = geometry_source == 'Points'
-                is_gadm_roi = geometry_source == 'GADM'
+                # Save to history — same shape as presets (snapshot covers only
+                # the active ROI source, incl. tolerance / feature ID column);
+                # run-time values override so the entry matches what was submitted.
                 history_entry = {
+                    **snapshot_config_from_session(),
                     'satellite': selected_satellite['id'],
                     'bands': selected_bands,
                     'reducers': {b: r for b, r in band_selections.items() if b in selected_bands},
-                    'geometry_source': geometry_source,
-                    'num_points': len(selected_points) if is_points_roi else 0,
-                    'selected_points': selected_points if is_points_roi else [],  # Save full points list
-                    'gadm_selection': (
-                        {k: v for k, v in st.session_state.get('gadm_selection', {}).items() if k != 'gdf'}  # without GDF
-                        if is_gadm_roi else {}
-                    ),
-                    'gadm_regions': st.session_state.get('gadm_regions') if is_gadm_roi else None,  # Specific regions if any
-                    'uploaded_shapefile': st.session_state.get('uploaded_shapefile') if geometry_source == 'Shapefile' else None,  # Save shapefile path
                     'dates': date_config,
                     'export_method': 'Drive',
-                    'output_format': 'CSV',
                     'task_id': task_id,
-                    'custom_filename': task_name
+                    'custom_filename': task_name,
                 }
-                history_manager.add_entry(history_entry)
+                HistoryManager().add_entry(history_entry)
                 
             else:
                 # Local download - get as CSV directly

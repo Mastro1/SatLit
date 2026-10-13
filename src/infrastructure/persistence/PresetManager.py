@@ -84,7 +84,8 @@ class PresetManager:
         if not cleaned_name:
             raise PresetValidationError("Please give your preset a name.")
 
-        portable = config_from_history_or_session(config)
+        # Local library: keep the shapefile path so File Import presets restore (share export strips it)
+        portable = config_from_history_or_session(config, keep_path=True)
         final_name = self.unique_name(cleaned_name) if make_unique_name else cleaned_name
         if not make_unique_name and self.get_by_name(final_name):
             raise PresetValidationError(f'A preset named "{final_name}" already exists.')
@@ -117,7 +118,7 @@ class PresetManager:
         if notes is not None:
             preset["notes"] = notes
         if config is not None:
-            preset["config"] = config_from_history_or_session(config)
+            preset["config"] = config_from_history_or_session(config, keep_path=True)
         preset["updated_at"] = datetime.now().isoformat()
         self._save_presets()
         return preset
