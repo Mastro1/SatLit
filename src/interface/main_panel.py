@@ -17,6 +17,7 @@ from datetime import datetime, date, timedelta
 from src.infrastructure.configuration.SettingsService import SettingsService
 from src.application.services.GeometryService import GeometryService
 from src.infrastructure.persistence.HistoryManager import HistoryManager
+from src.infrastructure.notifications.TaskWatcher import TaskWatcher
 from src.interface.map_utils import (
     create_base_map, add_geojson_overlay, add_markers, render_map,
     render_map_display, gdf_to_geojson, extract_gadm_display_columns,
@@ -74,6 +75,29 @@ def load_satellites():
             data = json.load(f)
             return data.get('satellites', [])
     return []
+
+
+@st.cache_resource
+def get_task_watcher() -> TaskWatcher:
+    """One watcher per server process: survives reruns, shared by all tabs.
+    Re-watches recent history tasks so a restart still reports running ones."""
+    settings = SettingsService()
+    watcher = TaskWatcher()
+    watcher.configure(
+        settings.get_setting("notifications", "enabled", True),
+        settings.get_setting("notifications", "poll_interval_seconds", 60),
+    )
+    project_id = settings.get_setting("gee", "project_id")
+    cutoff = datetime.now() - timedelta(days=7)
+    for entry in HistoryManager().get_history():
+        ts = HistoryManager._parse_timestamp(entry.get('timestamp'))
+        if entry.get('task_id') and project_id and ts and ts >= cutoff:
+            watcher.watch(
+                f"projects/{project_id}/operations/{entry['task_id']}",
+                entry.get('custom_filename', ''),
+                announce=False,
+            )
+    return watcher
 
 
 def active_satellite_supports_grid(satellite=None):
@@ -1583,10 +1607,11 @@ def run_extraction(settings_service: SettingsService, export_method: str):
                     selectors=ordered_columns
                 )
                 task.start()
-                
-                # Get task ID
-                task_id = task.status()['id']
-                
+
+                # start() already sets id/name: no extra status() round trip
+                task_id = task.id
+                get_task_watcher().watch(task.name, task_name)
+
                 st.success(f"✅ Task submitted successfully!")
                 st.info(f"**Task ID:** `{task_id}`")
                 st.info(f"**Output:** CSV file in Google Drive folder `{drive_folder}`")

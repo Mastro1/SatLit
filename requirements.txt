@@ -36,6 +36,7 @@ numpy==2.4.2
 packaging==26.0
 pandas==2.3.3
 pillow==12.1.0
+plyer==2.1.0; sys_platform == "win32"
 platformdirs==4.5.1
 proto-plus==1.27.1
 protobuf==6.33.5
