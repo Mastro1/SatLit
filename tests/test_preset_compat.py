@@ -8,14 +8,18 @@ still load cleanly and that the grid toggle predicate degrades to False
 exception anywhere.
 """
 import copy
+import json
 
 import pytest
 
 from src.infrastructure.persistence.PresetSerializer import (
     PresetValidationError,
+    config_from_history_or_session,
     from_share_payload,
+    to_share_payload,
 )
 from src.interface.main_panel import (
+    _snap_tolerance,
     active_satellite_supports_grid,
     load_satellites,
 )
@@ -128,6 +132,50 @@ def test_history_style_entry_converted_with_warning():
     assert any("Converted a history-style entry" in w for w in draft["warnings"])
     assert draft["config"]["satellite"] == "CHIRPS_DAILY"
     assert active_satellite_supports_grid(resolve_satellite("CHIRPS_DAILY")) is True
+
+
+def test_legacy_payload_without_new_roi_keys_loads():
+    # Presets saved before simplify_tolerance / feature_id_column existed:
+    # load cleanly, keys absent -> apply_loaded_settings falls back to defaults.
+    draft = from_share_payload(copy.deepcopy(OLD_SHARE_PAYLOAD))
+    assert "simplify_tolerance" not in draft["config"]
+    assert "feature_id_column" not in draft["config"]
+
+
+SHAPEFILE_SNAPSHOT = {
+    "satellite": "CHIRPS_DAILY",
+    "bands": ["precipitation"],
+    "geometry_source": "Shapefile",
+    "uploaded_shapefile": "C:/data/fields.shp",
+    "simplify_tolerance": 0.002,
+    "feature_id_column": "field_id",
+    "dates": {"start_year": 2000, "end_year": 2001},
+}
+
+
+def test_local_preset_keeps_path_share_strips_it():
+    local = config_from_history_or_session(copy.deepcopy(SHAPEFILE_SNAPSHOT), keep_path=True)
+    assert local["uploaded_shapefile"] == "C:/data/fields.shp"
+    assert local["shapefile_required"] is True
+
+    shared = to_share_payload({"name": "x", "config": local})["config"]
+    assert "uploaded_shapefile" not in shared
+    assert shared["shapefile_required"] is True
+
+
+def test_new_roi_keys_survive_share_round_trip():
+    payload = to_share_payload({"name": "x", "config": copy.deepcopy(SHAPEFILE_SNAPSHOT)})
+    config = from_share_payload(json.loads(json.dumps(payload)))["config"]
+    assert config["simplify_tolerance"] == 0.002
+    assert config["feature_id_column"] == "field_id"
+
+
+def test_snap_tolerance_to_nearest_step():
+    assert _snap_tolerance(0.01) == 0.01
+    assert _snap_tolerance(0.0099) == 0.01
+    assert _snap_tolerance(0.3) == 0.1
+    assert _snap_tolerance(None) == 0.0
+    assert _snap_tolerance("junk") == 0.0
 
 
 def test_garbage_still_rejected():

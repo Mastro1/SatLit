@@ -65,12 +65,16 @@ class GeometryService:
         # Drop Z coordinates (common in KML files)
         gdf['geometry'] = gdf['geometry'].apply(force_2d)
         
-        # Simplify shapes if requested (reduces GEE payload size)
-        if simplify_tolerance > 0:
-            point_types = {'Point', 'MultiPoint'}
-            if not set(gdf.geom_type.unique()).issubset(point_types):
-                gdf['geometry'] = gdf['geometry'].simplify(tolerance=simplify_tolerance)
-        
+        return self.simplify_shapes(gdf, simplify_tolerance)
+
+    @staticmethod
+    def simplify_shapes(gdf: gpd.GeoDataFrame, tolerance: float) -> gpd.GeoDataFrame:
+        """Return a copy with shape geometries simplified (degrees).
+        No-op (same object) for tolerance <= 0 or point-only data."""
+        if tolerance <= 0 or set(gdf.geom_type.unique()).issubset({'Point', 'MultiPoint'}):
+            return gdf
+        gdf = gdf.copy()
+        gdf['geometry'] = gdf.geometry.simplify(tolerance=tolerance)
         return gdf
 
     def parse_geometry(self, data, geometry_type: str) -> ee.Geometry:

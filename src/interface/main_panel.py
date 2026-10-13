@@ -106,6 +106,101 @@ def _maybe_add_pixel_grid(m, gdf):
         st.toast(f"Pixel grid unavailable: {str(grid_err)[:100]}")
 
 
+# Log-ish steps: the useful tolerance range spans orders of magnitude.
+SIMPLIFY_STEPS = [0.0, 0.0001, 0.0002, 0.0005, 0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1]
+SIMPLIFY_DEFAULT_GADM = 0.01
+SIMPLIFY_DEFAULT_IMPORT = 0.0
+
+
+def _simplify_label(tol):
+    if tol == 0:
+        return "Off"
+    meters = tol * 111_000
+    approx = f"~{meters / 1000:g} km" if meters >= 1000 else f"~{meters:.0f} m"
+    return f"{tol:g}° ({approx})"
+
+
+def _snap_tolerance(tol):
+    """Nearest SIMPLIFY_STEPS entry (hand-edited/odd preset values must not crash the slider)."""
+    try:
+        tol = float(tol)
+    except (TypeError, ValueError):
+        return 0.0
+    return min(SIMPLIFY_STEPS, key=lambda s: abs(s - tol))
+
+
+def _simplify_slider(key, default):
+    """Shape simplification tolerance (degrees), shared by map preview and GEE extraction.
+
+    ``key`` is a durable session key (read by extraction/snapshots); the widget
+    uses ``_w_<key>``, because Streamlit drops widget keys whenever the widget
+    isn't rendered (tab switch, preview closed)."""
+    wkey = f"_w_{key}"
+    if wkey not in st.session_state:
+        st.session_state[wkey] = _snap_tolerance(st.session_state.get(key, default))
+    tol = st.select_slider(
+        "Shape simplification",
+        options=SIMPLIFY_STEPS,
+        key=wkey,
+        format_func=_simplify_label,
+        help="Maximum distance (in degrees) a simplified vertex may deviate from the original shape. "
+             "The same value is used for this preview and for the extraction in GEE.\n\n"
+             "**Higher** → fewer vertices: faster map and a smaller GEE request (avoids payload "
+             "limits on large or very detailed regions), but coarser edges — small shapes can "
+             "collapse into triangles or lose area, which changes which pixels are aggregated.\n\n"
+             "**Off** → exact geometry, slower for complex shapes.\n\n"
+             "[Learn more](https://geopandas.org/en/stable/docs/reference/api/geopandas.GeoSeries.simplify.html)",
+    )
+    st.session_state[key] = tol
+    return tol
+
+
+def _restore_tolerance(key, value, default):
+    """Apply a loaded tolerance (missing → default) and force the slider to re-seed."""
+    st.session_state[key] = _snap_tolerance(default if value is None else value)
+    st.session_state.pop(f"_w_{key}", None)
+
+
+def _map_controls(grid_key, simplify_key, simplify_default):
+    """Pixel-grid checkbox and simplify slider side by side above a shape preview map.
+    Returns (show_grid, simplify_tolerance)."""
+    if not active_satellite_supports_grid():
+        return False, _simplify_slider(simplify_key, simplify_default)
+    col_grid, col_simplify = st.columns([1, 2], gap="large")
+    with col_grid:
+        show_grid = st.checkbox(
+            "Show pixel grid", value=False, key=grid_key,
+            help="Display-only preview of this dataset's native pixels — no download or selection.",
+        )
+    with col_simplify:
+        tol = _simplify_slider(simplify_key, simplify_default)
+    return show_grid, tol
+
+
+@st.cache_data(show_spinner=False, max_entries=4)
+def _read_import(path, mtime):
+    """Raw (unsimplified) imported file; mtime in key invalidates on file edit."""
+    return GeometryService().load_file(path)
+
+
+@st.cache_data(show_spinner=False, max_entries=16)
+def _import_preview(path, mtime, tol):
+    gdf = GeometryService.simplify_shapes(_read_import(path, mtime), tol)
+    return gdf, gdf_to_geojson(gdf)
+
+
+@st.cache_data(show_spinner=False, max_entries=16)
+def _gadm_preview(country, level, regions, tol):
+    """Simplified GADM gdf + geojson, keyed on primitives (no gdf hashing)."""
+    import geopandas as gpd
+    gdf = fetch_gadm_boundaries(country, level)
+    if regions:
+        gdf = gdf[gdf[f"NAME_{level}"].isin(regions)]
+    # Vanilla cast sidesteps the pygadm subclass bug
+    gdf = GeometryService.simplify_shapes(gpd.GeoDataFrame(gdf, geometry='geometry'), tol)
+    return gdf, gdf_to_geojson(gdf)
+
+
 def update_default_filename():
     """Update the custom filename in session state based on current selections."""
     # Get current satellite ID
@@ -182,6 +277,7 @@ def snapshot_config_from_session() -> dict:
 
     # Only the active ROI source's data enters the snapshot; data parked in
     # inactive tabs stays in session state but is ignored here.
+    extra = {}
     if geometry_source == "Points":
         snap_points = st.session_state.get("selected_points") or []
         snap_gadm, snap_regions, snap_shapefile = {}, None, None
@@ -190,12 +286,18 @@ def snapshot_config_from_session() -> dict:
         snap_gadm = gadm_selection
         snap_regions = st.session_state.get("gadm_regions")
         snap_shapefile = None
+        extra["simplify_tolerance"] = st.session_state.get("simplify_tol_gadm", SIMPLIFY_DEFAULT_GADM)
     else:  # Shapefile
         snap_points = []
         snap_gadm, snap_regions = {}, None
         snap_shapefile = st.session_state.get("uploaded_shapefile")
+        extra["simplify_tolerance"] = st.session_state.get("simplify_tol_import", SIMPLIFY_DEFAULT_IMPORT)
+        id_col = st.session_state.get("feature_id_column")
+        if id_col and id_col != "(auto index)":
+            extra["feature_id_column"] = id_col
 
     return {
+        **extra,
         "satellite": sat_id,
         "bands": bands,
         "reducers": reducers,
@@ -282,12 +384,26 @@ def apply_loaded_settings():
         )
     elif shapefile_path:
         st.session_state.import_file_path = shapefile_path
+        st.session_state.imported_geodata = None
+        st.session_state.import_preview_ready = False
         if os.path.exists(shapefile_path):
-            st.session_state.uploaded_shapefile = shapefile_path
-            st.toast(f"✅ Restored shapefile: {os.path.basename(shapefile_path)}")
+            try:
+                # Same metadata the "Load File" button produces, so the success
+                # box, ID selector, preview map and per-feature extraction all work.
+                st.session_state.imported_geodata = GeometryService().parse_file(shapefile_path)
+                st.session_state.uploaded_shapefile = shapefile_path
+                st.session_state.feature_id_column = loaded.get('feature_id_column') or '(auto index)'
+                st.session_state.import_preview_ready = True
+                st.toast(f"✅ Restored shapefile: {os.path.basename(shapefile_path)}")
+            except ValueError as e:
+                st.session_state.uploaded_shapefile = None
+                st.warning(f"⚠️ Could not read restored file {shapefile_path}: {e}")
         else:
             st.session_state.uploaded_shapefile = None
             st.warning(f"⚠️ File path restored but not found on disk: {shapefile_path}")
+
+    if shapefile_required:
+        _restore_tolerance('simplify_tol_import', loaded.get('simplify_tolerance'), SIMPLIFY_DEFAULT_IMPORT)
 
     if loaded.get('gadm_selection'):
         st.session_state.gadm_selection = loaded['gadm_selection']
@@ -301,8 +417,11 @@ def apply_loaded_settings():
         st.session_state.gadm_gdf = None
         st.session_state.pop('gadm_map_visible', None)
 
-        if loaded.get('gadm_regions'):
-            st.session_state.gadm_regions = loaded['gadm_regions']
+        # Regions always come from the loaded config (stale ones would leak otherwise)
+        st.session_state.gadm_regions = list(loaded.get('gadm_regions') or [])
+        _restore_tolerance('simplify_tol_gadm', loaded.get('simplify_tolerance'), SIMPLIFY_DEFAULT_GADM)
+        # render_gadm_input loads boundaries + map in this same run
+        st.session_state._gadm_autoload = True
 
     # 5. Restore Time/Dates
     if loaded.get('dates'):
@@ -805,14 +924,12 @@ def render_shapefile_input():
         # --- Feature ID Column selector ---
         file_columns = imported.get('columns', [])
         id_options = ['(auto index)'] + file_columns
-        current_selection = st.session_state.get('feature_id_column', '(auto index)')
-        # Ensure the stored selection is still valid for the current file
-        if current_selection not in id_options:
-            current_selection = '(auto index)'
+        # Ensure the stored (possibly restored) selection is valid for the current file
+        if st.session_state.get('feature_id_column') not in id_options:
+            st.session_state.feature_id_column = '(auto index)'
         selected_id_col = st.selectbox(
             "Feature ID Column",
             options=id_options,
-            index=id_options.index(current_selection),
             key="feature_id_column",
             help="Choose which column to use as the feature identifier in the output CSV. "
                  "'(auto index)' uses a numeric 1, 2, 3… index."
@@ -824,21 +941,27 @@ def render_shapefile_input():
         
         if st.session_state.get('import_preview_ready'):
             st.markdown("**Import Preview:**")
-            if geo_type != 'points' and active_satellite_supports_grid():
-                show_grid_import = st.checkbox(
-                    "Show pixel grid", value=False, key="show_grid_import"
+            if geo_type != 'points':
+                show_grid_import, simplify_tol = _map_controls(
+                    "show_grid_import", "simplify_tol_import", SIMPLIFY_DEFAULT_IMPORT
                 )
-                st.caption("Display-only preview of this dataset's native pixels — no download or selection.")
             else:
                 show_grid_import = False
             import_path = st.session_state.get('uploaded_shapefile', '')
             if import_path and os.path.exists(import_path):
                 try:
-                    # Load file on-demand just for preview (simplified for rendering speed)
-                    gdf = geometry_service.load_file(import_path, simplify_tolerance=0.005)
-                    
-                    centroid = gdf.geometry.unary_union.centroid
-                    center = [centroid.y, centroid.x]
+                    # Cached read + per-tolerance simplify/geojson: slider moves stay fast
+                    mtime = os.path.getmtime(import_path)
+                    raw_gdf = _read_import(import_path, mtime)
+                    if geo_type == 'points':
+                        gdf = raw_gdf
+                    else:
+                        gdf, geojson_data = _import_preview(import_path, mtime, simplify_tol)
+
+                    # Raw bounds: stable across slider moves (keeps persisted view), and
+                    # cheaper than a unary_union centroid; fit_bounds sets the view anyway.
+                    bounds = raw_gdf.total_bounds
+                    center = [(bounds[1] + bounds[3]) / 2, (bounds[0] + bounds[2]) / 2]
                     m = create_base_map(center=center, zoom=5)
 
                     if geo_type == 'points':
@@ -852,13 +975,12 @@ def render_shapefile_input():
                                 flat_points.append(pt)
                         add_markers(m, flat_points, color='blue')
                     else:
-                        geojson_data = gdf_to_geojson(gdf)
                         add_geojson_overlay(m, geojson_data)
 
                     if show_grid_import:
                         _maybe_add_pixel_grid(m, gdf)
 
-                    render_map_display(m, key="import_preview_map", fit_bounds=gdf.total_bounds)
+                    render_map_display(m, key="import_preview_map", fit_bounds=bounds)
                 except Exception as map_err:
                     st.warning(f"Map preview unavailable: {str(map_err)[:100]}")
 
@@ -909,8 +1031,8 @@ def render_gadm_input():
         country_changed = st.session_state.get('gadm_country_loaded') != country
         level_changed = st.session_state.get('gadm_level_loaded') != admin_level
         
-        if load_clicked:
-            # User explicitly requested a load — always proceed
+        # Explicit click, or a just-loaded preset/history entry (one-shot flag)
+        if load_clicked or st.session_state.pop('_gadm_autoload', False):
             try:
                 with st.spinner(f"Loading {country} boundaries..."):
                     gdf = fetch_gadm_boundaries(country, admin_level)
@@ -948,43 +1070,48 @@ def render_gadm_input():
                 
                 # If we have subdivisions, let user select specific ones
                 loaded_level = st.session_state.get('gadm_level_loaded', 0)
+                regions = ()
                 if loaded_level > 0 and len(gdf) > 1:
                     name_col = f"NAME_{loaded_level}"
                     if name_col in gdf.columns:
                         region_names = gdf[name_col].tolist()
-                        
+                        # Restored names missing from this boundary set would raise
+                        if "gadm_regions" in st.session_state:
+                            st.session_state.gadm_regions = [
+                                r for r in (st.session_state.gadm_regions or []) if r in region_names
+                            ]
+
                         selected_regions = st.multiselect(
                             f"Select specific regions (optional)",
                             options=region_names,
-                            default=[],
                             key="gadm_regions",
                             help="Leave empty to use entire country"
                         )
                         
                         if selected_regions:
                             gdf = gdf[gdf[name_col].isin(selected_regions)]
+                            regions = tuple(selected_regions)
                             st.info(f"Selected {len(gdf)} region(s)")
                 
                 # Display map
                 st.markdown("**Boundary Preview:**")
-                if active_satellite_supports_grid():
-                    show_grid_gadm = st.checkbox(
-                        "Show pixel grid", value=False, key="show_grid_gadm"
-                    )
-                    st.caption("Display-only preview of this dataset's native pixels — no download or selection.")
-                else:
-                    show_grid_gadm = False
+                show_grid_gadm, simplify_tol = _map_controls(
+                    "show_grid_gadm", "simplify_tol_gadm", SIMPLIFY_DEFAULT_GADM
+                )
 
                 try:
-                    # Get centroid for map center
-                    centroid = gdf.geometry.unary_union.centroid
-                    center = [centroid.y, centroid.x]
-                    
+                    # Raw bounds: stable across slider moves (keeps persisted view), and
+                    # cheaper than a unary_union centroid; fit_bounds sets the view anyway.
+                    bounds = gdf.total_bounds
+                    center = [(bounds[1] + bounds[3]) / 2, (bounds[0] + bounds[2]) / 2]
+
                     # Create folium map with satellite base
                     m = create_base_map(center=center, zoom=5)
 
-                    # Convert to GeoJSON and detect display columns
-                    geojson_data = gdf_to_geojson(gdf)
+                    # Cached per tolerance: slider moves stay fast
+                    simple_gdf, geojson_data = _gadm_preview(
+                        loaded_country, loaded_level, regions, simplify_tol
+                    )
                     display_cols = extract_gadm_display_columns(geojson_data)
                     
                     # Build tooltip: use the most specific NAME column
@@ -1007,10 +1134,10 @@ def render_gadm_input():
                     )
 
                     if show_grid_gadm:
-                        _maybe_add_pixel_grid(m, gdf)
+                        _maybe_add_pixel_grid(m, simple_gdf)
 
                     # Render map
-                    render_map_display(m, key="gadm_map", fit_bounds=gdf.total_bounds)
+                    render_map_display(m, key="gadm_map", fit_bounds=bounds)
                     
                 except Exception as map_error:
                     st.warning(f"Map preview unavailable: {str(map_error)[:100]}")
@@ -1034,23 +1161,18 @@ def render_verification_map():
     pass
 
 
+@st.fragment
 def render_time_section(loaded_settings: dict):
-    """Section 3: Time Definition with form to reduce reruns."""
+    """Section 3: Time Definition. A fragment: date widgets rerun only this
+    section (no map/sidebar rebuild), so they apply live without a button."""
     st.header("3️⃣ Time Definition")
-    
+
     # Derive minimum selectable year from the selected satellite's start date
     selected_satellite = st.session_state.get('selected_satellite')
     if selected_satellite and selected_satellite.get('startDate'):
         sat_min_year = int(selected_satellite['startDate'][:4])
     else:
         sat_min_year = 1980
-
-    # Check for invalid date ranges in session state
-    current_start = st.session_state.get('start_year', 2020)
-    current_end = st.session_state.get('end_year', datetime.now().year)
-    
-    if current_end < current_start:
-        st.error(f"⚠️ **Invalid Date Range**: End Year ({current_end}) is before Start Year ({current_start}).")
 
     # Seasonality filter - OUTSIDE form to allow instant UI update.
     # Session state drives when present; value only seeds a fresh widget.
@@ -1062,7 +1184,7 @@ def render_time_section(loaded_settings: dict):
     # Sync use_season to session state immediately
     st.session_state.use_season = use_season
 
-    with st.form("time_definition_form"):
+    with st.container():
         col1, col2 = st.columns(2)
 
         # Year/DOY widgets: session state drives when present (e.g. after
@@ -1124,41 +1246,29 @@ def render_time_section(loaded_settings: dict):
             if start_doy > end_doy:
                 st.info("💡 **Cross-Year Season**: This period will handle date ranges spanning across consecutive years.")
 
-        # Form submit button
-        submitted = st.form_submit_button("✅ Apply Date Settings", use_container_width=True)
-        
-        if submitted:
-            # Update session state with form values
-            st.session_state.start_year = start_year
-            st.session_state.end_year = end_year
-            # use_season is already updated via its own key/interactive widget
-            st.session_state.start_doy = start_doy
-            st.session_state.end_doy = end_doy
-            
-            # Also update date_config for the extraction service
-            st.session_state.date_config = {
-                'start_year': start_year,
-                'end_year': end_year,
-                'start_doy': start_doy,
-                'end_doy': end_doy,
-                'use_season': use_season
-            }
-            
-            # Update the custom filename based on new dates
-            update_default_filename()
-            
-            st.success("Dates and Filename updated!")
-            st.rerun()
+    if end_year < start_year:
+        st.error(f"⚠️ **Invalid Date Range**: End Year ({end_year}) is before Start Year ({start_year}).")
 
-    # If no date_config yet, initialize it from session state or defaults
-    if 'date_config' not in st.session_state:
-        st.session_state.date_config = {
-            'start_year': st.session_state.get('start_year', 2020),
-            'end_year': st.session_state.get('end_year', datetime.now().year),
-            'start_doy': st.session_state.get('start_doy', 1),
-            'end_doy': st.session_state.get('end_doy', 365),
-            'use_season': st.session_state.get('use_season', False)
-        }
+    # Live sync: what's on screen is what extraction/snapshots/history use
+    prev = st.session_state.get('date_config') or {}
+    st.session_state.start_year = start_year
+    st.session_state.end_year = end_year
+    st.session_state.start_doy = start_doy
+    st.session_state.end_doy = end_doy
+    st.session_state.date_config = {
+        'start_year': start_year,
+        'end_year': end_year,
+        'start_doy': start_doy,
+        'end_doy': end_doy,
+        'use_season': use_season
+    }
+
+    # The auto filename (Execution section, outside this fragment) depends on
+    # the years only: refresh the whole app just for year edits, never for
+    # DOY slider moves.
+    if prev and (prev.get('start_year'), prev.get('end_year')) != (start_year, end_year):
+        update_default_filename()
+        st.rerun(scope="app")
 
 
 def render_execution_section(settings_service: SettingsService, satellites: list):
@@ -1482,32 +1592,20 @@ def run_extraction(settings_service: SettingsService, export_method: str):
                 st.info(f"**Output:** CSV file in Google Drive folder `{drive_folder}`")
                 st.markdown(f"📊 [View in GEE Console](https://code.earthengine.google.com/tasks)")
                 
-                # Save to history — only the active ROI source's fields are
-                # populated; inactive sources are stored empty (all history/
-                # preset readers use .get, so empty inactive fields are safe).
-                history_manager = HistoryManager()
-                is_points_roi = geometry_source == 'Points'
-                is_gadm_roi = geometry_source == 'GADM'
+                # Save to history — same shape as presets (snapshot covers only
+                # the active ROI source, incl. tolerance / feature ID column);
+                # run-time values override so the entry matches what was submitted.
                 history_entry = {
+                    **snapshot_config_from_session(),
                     'satellite': selected_satellite['id'],
                     'bands': selected_bands,
                     'reducers': {b: r for b, r in band_selections.items() if b in selected_bands},
-                    'geometry_source': geometry_source,
-                    'num_points': len(selected_points) if is_points_roi else 0,
-                    'selected_points': selected_points if is_points_roi else [],  # Save full points list
-                    'gadm_selection': (
-                        {k: v for k, v in st.session_state.get('gadm_selection', {}).items() if k != 'gdf'}  # without GDF
-                        if is_gadm_roi else {}
-                    ),
-                    'gadm_regions': st.session_state.get('gadm_regions') if is_gadm_roi else None,  # Specific regions if any
-                    'uploaded_shapefile': st.session_state.get('uploaded_shapefile') if geometry_source == 'Shapefile' else None,  # Save shapefile path
                     'dates': date_config,
                     'export_method': 'Drive',
-                    'output_format': 'CSV',
                     'task_id': task_id,
-                    'custom_filename': task_name
+                    'custom_filename': task_name,
                 }
-                history_manager.add_entry(history_entry)
+                HistoryManager().add_entry(history_entry)
                 
             else:
                 # Local download - get as CSV directly
@@ -1607,8 +1705,8 @@ def build_geometry_and_features():
         if imported and import_path:
             geo_type = imported['type']
 
-            # Load file on-demand with simplification for shapes
-            simplify = 0.01 if geo_type == 'shapes' else 0.0
+            # Same tolerance as the map preview slider (shapes only)
+            simplify = st.session_state.get('simplify_tol_import', SIMPLIFY_DEFAULT_IMPORT) if geo_type == 'shapes' else 0.0
             gdf = geometry_service.load_file(import_path, simplify_tolerance=simplify)
 
             # Determine which column to use as feature identifier
@@ -1689,8 +1787,9 @@ def build_geometry_and_features():
         # Cannot use gdf.__geo_interface__ or subset the gdf
         # Instead, access geometry series directly and build EE features manually
         
-        # Simplify geometries to avoid GEE payload limits
-        simplified_geoms = gdf.geometry.simplify(tolerance=0.01)
+        # Same tolerance as the map preview slider (avoids GEE payload limits)
+        tol = st.session_state.get('simplify_tol_gadm', SIMPLIFY_DEFAULT_GADM)
+        simplified_geoms = gdf.geometry.simplify(tolerance=tol) if tol > 0 else gdf.geometry
         
         # Build EE features from each geometry
         ee_features = []

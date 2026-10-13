@@ -326,6 +326,16 @@ class ViewPersistencePlugin(folium.MacroElement):
             // it never emits a `name` key, so options.name can never match.
             var BASE_ATTR = {Satellite: 'Esri', Streets: 'OpenStreetMap'};
             var seenLayers = {};
+            // Snapshot NOW and block saving until restore ran: resize-driven
+            // moveends (iframe height set by st_folium / DragHandlePlugin) fire
+            // before the deferred restore and would overwrite the stored view
+            // with the fresh fitBounds one.
+            var restored = false;
+            var initialView = null;
+            try {
+                var raw0 = window.localStorage.getItem(LS_KEY);
+                if (raw0) initialView = JSON.parse(raw0);
+            } catch (e) {}
 
             function loadView() {
                 try {
@@ -424,6 +434,7 @@ class ViewPersistencePlugin(folium.MacroElement):
             }
 
             function persistView() {
+                if (!restored) return;
                 try {
                     var center = readCenter();
                     var zoom = readZoom();
@@ -441,16 +452,19 @@ class ViewPersistencePlugin(folium.MacroElement):
 
             function restoreView() {
                 try {
-                    var stored = loadView();
+                    var stored = initialView;
                     if (!stored) return;
                     if (stored.hash !== ROI_HASH) return;
                     if (stored.center && (stored.zoom !== null && stored.zoom !== undefined)) {
                         try {
-                            map.setView(stored.center, stored.zoom);
+                            map.setView(stored.center, stored.zoom, {animate: false});
                         } catch (e) {}
                     }
                     if (stored.baselayer) activateBase(stored.baselayer);
-                } catch (e) {}
+                } catch (e) {
+                } finally {
+                    restored = true;
+                }
             }
 
             try {
