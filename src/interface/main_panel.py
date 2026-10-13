@@ -106,6 +106,78 @@ def _maybe_add_pixel_grid(m, gdf):
         st.toast(f"Pixel grid unavailable: {str(grid_err)[:100]}")
 
 
+# Log-ish steps: the useful tolerance range spans orders of magnitude.
+SIMPLIFY_STEPS = [0.0, 0.0001, 0.0002, 0.0005, 0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1]
+SIMPLIFY_DEFAULT_GADM = 0.01
+SIMPLIFY_DEFAULT_IMPORT = 0.0
+
+
+def _simplify_label(tol):
+    if tol == 0:
+        return "Off"
+    meters = tol * 111_000
+    approx = f"~{meters / 1000:g} km" if meters >= 1000 else f"~{meters:.0f} m"
+    return f"{tol:g}° ({approx})"
+
+
+def _simplify_slider(key, default):
+    """Shape simplification tolerance (degrees), shared by map preview and GEE extraction."""
+    return st.select_slider(
+        "Shape simplification",
+        options=SIMPLIFY_STEPS,
+        value=default,
+        key=key,
+        format_func=_simplify_label,
+        help="Maximum distance (in degrees) a simplified vertex may deviate from the original shape. "
+             "The same value is used for this preview and for the extraction in GEE.\n\n"
+             "**Higher** → fewer vertices: faster map and a smaller GEE request (avoids payload "
+             "limits on large or very detailed regions), but coarser edges — small shapes can "
+             "collapse into triangles or lose area, which changes which pixels are aggregated.\n\n"
+             "**Off** → exact geometry, slower for complex shapes.\n\n"
+             "[Learn more](https://geopandas.org/en/stable/docs/reference/api/geopandas.GeoSeries.simplify.html)",
+    )
+
+
+def _map_controls(grid_key, simplify_key, simplify_default):
+    """Pixel-grid checkbox and simplify slider side by side above a shape preview map.
+    Returns (show_grid, simplify_tolerance)."""
+    if not active_satellite_supports_grid():
+        return False, _simplify_slider(simplify_key, simplify_default)
+    col_grid, col_simplify = st.columns([1, 2], gap="large")
+    with col_grid:
+        show_grid = st.checkbox(
+            "Show pixel grid", value=False, key=grid_key,
+            help="Display-only preview of this dataset's native pixels — no download or selection.",
+        )
+    with col_simplify:
+        tol = _simplify_slider(simplify_key, simplify_default)
+    return show_grid, tol
+
+
+@st.cache_data(show_spinner=False, max_entries=4)
+def _read_import(path, mtime):
+    """Raw (unsimplified) imported file; mtime in key invalidates on file edit."""
+    return GeometryService().load_file(path)
+
+
+@st.cache_data(show_spinner=False, max_entries=16)
+def _import_preview(path, mtime, tol):
+    gdf = GeometryService.simplify_shapes(_read_import(path, mtime), tol)
+    return gdf, gdf_to_geojson(gdf)
+
+
+@st.cache_data(show_spinner=False, max_entries=16)
+def _gadm_preview(country, level, regions, tol):
+    """Simplified GADM gdf + geojson, keyed on primitives (no gdf hashing)."""
+    import geopandas as gpd
+    gdf = fetch_gadm_boundaries(country, level)
+    if regions:
+        gdf = gdf[gdf[f"NAME_{level}"].isin(regions)]
+    # Vanilla cast sidesteps the pygadm subclass bug
+    gdf = GeometryService.simplify_shapes(gpd.GeoDataFrame(gdf, geometry='geometry'), tol)
+    return gdf, gdf_to_geojson(gdf)
+
+
 def update_default_filename():
     """Update the custom filename in session state based on current selections."""
     # Get current satellite ID
@@ -824,21 +896,27 @@ def render_shapefile_input():
         
         if st.session_state.get('import_preview_ready'):
             st.markdown("**Import Preview:**")
-            if geo_type != 'points' and active_satellite_supports_grid():
-                show_grid_import = st.checkbox(
-                    "Show pixel grid", value=False, key="show_grid_import"
+            if geo_type != 'points':
+                show_grid_import, simplify_tol = _map_controls(
+                    "show_grid_import", "simplify_tol_import", SIMPLIFY_DEFAULT_IMPORT
                 )
-                st.caption("Display-only preview of this dataset's native pixels — no download or selection.")
             else:
                 show_grid_import = False
             import_path = st.session_state.get('uploaded_shapefile', '')
             if import_path and os.path.exists(import_path):
                 try:
-                    # Load file on-demand just for preview (simplified for rendering speed)
-                    gdf = geometry_service.load_file(import_path, simplify_tolerance=0.005)
-                    
-                    centroid = gdf.geometry.unary_union.centroid
-                    center = [centroid.y, centroid.x]
+                    # Cached read + per-tolerance simplify/geojson: slider moves stay fast
+                    mtime = os.path.getmtime(import_path)
+                    raw_gdf = _read_import(import_path, mtime)
+                    if geo_type == 'points':
+                        gdf = raw_gdf
+                    else:
+                        gdf, geojson_data = _import_preview(import_path, mtime, simplify_tol)
+
+                    # Raw bounds: stable across slider moves (keeps persisted view), and
+                    # cheaper than a unary_union centroid; fit_bounds sets the view anyway.
+                    bounds = raw_gdf.total_bounds
+                    center = [(bounds[1] + bounds[3]) / 2, (bounds[0] + bounds[2]) / 2]
                     m = create_base_map(center=center, zoom=5)
 
                     if geo_type == 'points':
@@ -852,13 +930,12 @@ def render_shapefile_input():
                                 flat_points.append(pt)
                         add_markers(m, flat_points, color='blue')
                     else:
-                        geojson_data = gdf_to_geojson(gdf)
                         add_geojson_overlay(m, geojson_data)
 
                     if show_grid_import:
                         _maybe_add_pixel_grid(m, gdf)
 
-                    render_map_display(m, key="import_preview_map", fit_bounds=gdf.total_bounds)
+                    render_map_display(m, key="import_preview_map", fit_bounds=bounds)
                 except Exception as map_err:
                     st.warning(f"Map preview unavailable: {str(map_err)[:100]}")
 
@@ -948,6 +1025,7 @@ def render_gadm_input():
                 
                 # If we have subdivisions, let user select specific ones
                 loaded_level = st.session_state.get('gadm_level_loaded', 0)
+                regions = ()
                 if loaded_level > 0 and len(gdf) > 1:
                     name_col = f"NAME_{loaded_level}"
                     if name_col in gdf.columns:
@@ -963,28 +1041,28 @@ def render_gadm_input():
                         
                         if selected_regions:
                             gdf = gdf[gdf[name_col].isin(selected_regions)]
+                            regions = tuple(selected_regions)
                             st.info(f"Selected {len(gdf)} region(s)")
                 
                 # Display map
                 st.markdown("**Boundary Preview:**")
-                if active_satellite_supports_grid():
-                    show_grid_gadm = st.checkbox(
-                        "Show pixel grid", value=False, key="show_grid_gadm"
-                    )
-                    st.caption("Display-only preview of this dataset's native pixels — no download or selection.")
-                else:
-                    show_grid_gadm = False
+                show_grid_gadm, simplify_tol = _map_controls(
+                    "show_grid_gadm", "simplify_tol_gadm", SIMPLIFY_DEFAULT_GADM
+                )
 
                 try:
-                    # Get centroid for map center
-                    centroid = gdf.geometry.unary_union.centroid
-                    center = [centroid.y, centroid.x]
-                    
+                    # Raw bounds: stable across slider moves (keeps persisted view), and
+                    # cheaper than a unary_union centroid; fit_bounds sets the view anyway.
+                    bounds = gdf.total_bounds
+                    center = [(bounds[1] + bounds[3]) / 2, (bounds[0] + bounds[2]) / 2]
+
                     # Create folium map with satellite base
                     m = create_base_map(center=center, zoom=5)
 
-                    # Convert to GeoJSON and detect display columns
-                    geojson_data = gdf_to_geojson(gdf)
+                    # Cached per tolerance: slider moves stay fast
+                    simple_gdf, geojson_data = _gadm_preview(
+                        loaded_country, loaded_level, regions, simplify_tol
+                    )
                     display_cols = extract_gadm_display_columns(geojson_data)
                     
                     # Build tooltip: use the most specific NAME column
@@ -1007,10 +1085,10 @@ def render_gadm_input():
                     )
 
                     if show_grid_gadm:
-                        _maybe_add_pixel_grid(m, gdf)
+                        _maybe_add_pixel_grid(m, simple_gdf)
 
                     # Render map
-                    render_map_display(m, key="gadm_map", fit_bounds=gdf.total_bounds)
+                    render_map_display(m, key="gadm_map", fit_bounds=bounds)
                     
                 except Exception as map_error:
                     st.warning(f"Map preview unavailable: {str(map_error)[:100]}")
@@ -1607,8 +1685,8 @@ def build_geometry_and_features():
         if imported and import_path:
             geo_type = imported['type']
 
-            # Load file on-demand with simplification for shapes
-            simplify = 0.01 if geo_type == 'shapes' else 0.0
+            # Same tolerance as the map preview slider (shapes only)
+            simplify = st.session_state.get('simplify_tol_import', SIMPLIFY_DEFAULT_IMPORT) if geo_type == 'shapes' else 0.0
             gdf = geometry_service.load_file(import_path, simplify_tolerance=simplify)
 
             # Determine which column to use as feature identifier
@@ -1689,8 +1767,9 @@ def build_geometry_and_features():
         # Cannot use gdf.__geo_interface__ or subset the gdf
         # Instead, access geometry series directly and build EE features manually
         
-        # Simplify geometries to avoid GEE payload limits
-        simplified_geoms = gdf.geometry.simplify(tolerance=0.01)
+        # Same tolerance as the map preview slider (avoids GEE payload limits)
+        tol = st.session_state.get('simplify_tol_gadm', SIMPLIFY_DEFAULT_GADM)
+        simplified_geoms = gdf.geometry.simplify(tolerance=tol) if tol > 0 else gdf.geometry
         
         # Build EE features from each geometry
         ee_features = []
