@@ -1161,23 +1161,18 @@ def render_verification_map():
     pass
 
 
+@st.fragment
 def render_time_section(loaded_settings: dict):
-    """Section 3: Time Definition with form to reduce reruns."""
+    """Section 3: Time Definition. A fragment: date widgets rerun only this
+    section (no map/sidebar rebuild), so they apply live without a button."""
     st.header("3️⃣ Time Definition")
-    
+
     # Derive minimum selectable year from the selected satellite's start date
     selected_satellite = st.session_state.get('selected_satellite')
     if selected_satellite and selected_satellite.get('startDate'):
         sat_min_year = int(selected_satellite['startDate'][:4])
     else:
         sat_min_year = 1980
-
-    # Check for invalid date ranges in session state
-    current_start = st.session_state.get('start_year', 2020)
-    current_end = st.session_state.get('end_year', datetime.now().year)
-    
-    if current_end < current_start:
-        st.error(f"⚠️ **Invalid Date Range**: End Year ({current_end}) is before Start Year ({current_start}).")
 
     # Seasonality filter - OUTSIDE form to allow instant UI update.
     # Session state drives when present; value only seeds a fresh widget.
@@ -1189,7 +1184,7 @@ def render_time_section(loaded_settings: dict):
     # Sync use_season to session state immediately
     st.session_state.use_season = use_season
 
-    with st.form("time_definition_form"):
+    with st.container():
         col1, col2 = st.columns(2)
 
         # Year/DOY widgets: session state drives when present (e.g. after
@@ -1251,41 +1246,29 @@ def render_time_section(loaded_settings: dict):
             if start_doy > end_doy:
                 st.info("💡 **Cross-Year Season**: This period will handle date ranges spanning across consecutive years.")
 
-        # Form submit button
-        submitted = st.form_submit_button("✅ Apply Date Settings", use_container_width=True)
-        
-        if submitted:
-            # Update session state with form values
-            st.session_state.start_year = start_year
-            st.session_state.end_year = end_year
-            # use_season is already updated via its own key/interactive widget
-            st.session_state.start_doy = start_doy
-            st.session_state.end_doy = end_doy
-            
-            # Also update date_config for the extraction service
-            st.session_state.date_config = {
-                'start_year': start_year,
-                'end_year': end_year,
-                'start_doy': start_doy,
-                'end_doy': end_doy,
-                'use_season': use_season
-            }
-            
-            # Update the custom filename based on new dates
-            update_default_filename()
-            
-            st.success("Dates and Filename updated!")
-            st.rerun()
+    if end_year < start_year:
+        st.error(f"⚠️ **Invalid Date Range**: End Year ({end_year}) is before Start Year ({start_year}).")
 
-    # If no date_config yet, initialize it from session state or defaults
-    if 'date_config' not in st.session_state:
-        st.session_state.date_config = {
-            'start_year': st.session_state.get('start_year', 2020),
-            'end_year': st.session_state.get('end_year', datetime.now().year),
-            'start_doy': st.session_state.get('start_doy', 1),
-            'end_doy': st.session_state.get('end_doy', 365),
-            'use_season': st.session_state.get('use_season', False)
-        }
+    # Live sync: what's on screen is what extraction/snapshots/history use
+    prev = st.session_state.get('date_config') or {}
+    st.session_state.start_year = start_year
+    st.session_state.end_year = end_year
+    st.session_state.start_doy = start_doy
+    st.session_state.end_doy = end_doy
+    st.session_state.date_config = {
+        'start_year': start_year,
+        'end_year': end_year,
+        'start_doy': start_doy,
+        'end_doy': end_doy,
+        'use_season': use_season
+    }
+
+    # The auto filename (Execution section, outside this fragment) depends on
+    # the years only: refresh the whole app just for year edits, never for
+    # DOY slider moves.
+    if prev and (prev.get('start_year'), prev.get('end_year')) != (start_year, end_year):
+        update_default_filename()
+        st.rerun(scope="app")
 
 
 def render_execution_section(settings_service: SettingsService, satellites: list):
