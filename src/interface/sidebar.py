@@ -21,7 +21,7 @@ from src.infrastructure.persistence.PresetSerializer import (
     sanitize_filename,
     to_share_json,
 )
-from src.interface.main_panel import snapshot_config_from_session
+from src.interface.main_panel import get_task_watcher, snapshot_config_from_session
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 USER_PREFS_FILE = PROJECT_ROOT / ".cache" / "user_preferences.json"
@@ -161,6 +161,21 @@ def settings_dialog(settings_service):
         index=reducers.index(current_reducer) if current_reducer in reducers else 0
     )
 
+    st.markdown("### Notifications")
+    notify_enabled = st.checkbox(
+        "Desktop notification when a task finishes",
+        value=settings_service.get_setting("notifications", "enabled", True),
+        help="Only tasks submitted from SatLit, while SatLit is running",
+    )
+    poll_interval = st.number_input(
+        "Check every (seconds)",
+        min_value=30,
+        max_value=3600,
+        step=15,
+        value=int(settings_service.get_setting("notifications", "poll_interval_seconds", 60)),
+        disabled=not notify_enabled,
+    )
+
     _render_desktop_shortcut_controls()
 
     # Save button
@@ -173,6 +188,9 @@ def settings_dialog(settings_service):
             settings_service.update_setting("paths", "download_folder_local", new_local_path)
             settings_service.update_setting("paths", "cache_folder", new_cache)
             settings_service.update_setting("defaults", "default_reducer", new_reducer)
+            settings_service.update_setting("notifications", "enabled", notify_enabled)
+            settings_service.update_setting("notifications", "poll_interval_seconds", int(poll_interval))
+            get_task_watcher().configure(notify_enabled, poll_interval)
 
             # Force re-initialization if project changed
             if new_project != current_project:

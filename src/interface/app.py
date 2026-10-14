@@ -28,6 +28,9 @@ def main():
         st.session_state['update_info'] = checker.check_for_updates()
         st.session_state['update_checker'] = checker
 
+    # Start task notifications (cached: runs once per server process)
+    main_panel.get_task_watcher()
+
     # Render Interface
     sidebar.render(settings_service)
     main_panel.render(settings_service)

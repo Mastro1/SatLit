@@ -10,3 +10,7 @@ cache_folder = "./.cache/"
 default_satellite = "MODIS_MOD13Q1_061"
 default_method = "Drive"
 default_reducer = "mean"
+
+[notifications]
+enabled = true
+poll_interval_seconds = 60

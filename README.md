@@ -48,6 +48,7 @@ This tool is especially useful for:
 - **Reproducibility & History**: Settings are persisted in `config/settings.toml`; full job history is tracked in `.cache/history.json` for instant parameter reloading. From Settings you can inspect cache size and clear all history or only entries older than a chosen age.
 - **Desktop Shortcut**: Create or recreate the SatLit desktop launcher anytime from Settings (in addition to the one-time first-run prompt).
 - **GEE Task Monitor**: Refresh recent Earth Engine tasks in the sidebar, with a direct link to the [GEE Task Manager](https://code.earthengine.google.com/tasks).
+- **Task Notifications**: A desktop banner (Windows, macOS, Linux) tells you when a Drive export submitted from SatLit completes, fails, or is cancelled — with its duration. Works while SatLit is running; tasks still running after a restart are picked up again. Toggle it and set the check interval (default 60 s) under **Settings → Notifications**.
 - **Live Map Verification**: Automated geometry and map rendering to visually confirm your ROI before submitting a job.
 - **Pixel Grid Preview**: For supported climate datasets, overlay the exact native satellite pixels on shapefile/GADM previews (display-only; no download or selection).
 - **Shape Simplification**: Adjustable simplification slider on shapefile/GADM previews, applied to both the map and the GEE extraction.

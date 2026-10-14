@@ -17,6 +17,7 @@ from datetime import datetime, date, timedelta
 from src.infrastructure.configuration.SettingsService import SettingsService
 from src.application.services.GeometryService import GeometryService
 from src.infrastructure.persistence.HistoryManager import HistoryManager
+from src.infrastructure.notifications.TaskWatcher import TaskWatcher
 from src.interface.map_utils import (
     create_base_map, add_geojson_overlay, add_markers, render_map,
     render_map_display, gdf_to_geojson, extract_gadm_display_columns,
@@ -74,6 +75,29 @@ def load_satellites():
             data = json.load(f)
             return data.get('satellites', [])
     return []
+
+
+@st.cache_resource
+def get_task_watcher() -> TaskWatcher:
+    """One watcher per server process: survives reruns, shared by all tabs.
+    Re-watches recent history tasks so a restart still reports running ones."""
+    settings = SettingsService()
+    watcher = TaskWatcher()
+    watcher.configure(
+        settings.get_setting("notifications", "enabled", True),
+        settings.get_setting("notifications", "poll_interval_seconds", 60),
+    )
+    project_id = settings.get_setting("gee", "project_id")
+    cutoff = datetime.now() - timedelta(days=7)
+    for entry in HistoryManager().get_history():
+        ts = HistoryManager._parse_timestamp(entry.get('timestamp'))
+        if entry.get('task_id') and project_id and ts and ts >= cutoff:
+            watcher.watch(
+                f"projects/{project_id}/operations/{entry['task_id']}",
+                entry.get('custom_filename', ''),
+                announce=False,
+            )
+    return watcher
 
 
 def active_satellite_supports_grid(satellite=None):
@@ -629,6 +653,25 @@ def render_roi_section(loaded_settings: dict):
     render_verification_map()
 
 
+def _csv_points(df):
+    """(points, skipped_rows) from a points CSV, or None if no lat/lon columns.
+
+    Empty / non-numeric / out-of-range rows are skipped: NaN would otherwise
+    become a point and slip past dedup (nan != nan).
+    """
+    import pandas as pd
+
+    lat_cols = [c for c in df.columns if c.lower() in ['lat', 'latitude', 'y', 'lat_dec']]
+    lon_cols = [c for c in df.columns if c.lower() in ['lon', 'longitude', 'x', 'lon_dec', 'lng']]
+    if not lat_cols or not lon_cols:
+        return None
+    coords = df[[lat_cols[0], lon_cols[0]]].apply(pd.to_numeric, errors='coerce').dropna()
+    coords = coords[coords.iloc[:, 0].between(-90, 90) & coords.iloc[:, 1].between(-180, 180)]
+    points = [{'lat': round(float(la), 6), 'lon': round(float(lo), 6)}
+              for la, lo in coords.itertuples(index=False)]
+    return points, len(df) - len(coords)
+
+
 def render_point_input(loaded_settings: dict):
     """Point coordinate input with multiple points support."""
     st.subheader("Point Selection")
@@ -709,42 +752,61 @@ def render_point_input(loaded_settings: dict):
             "Or simply copy the URL from your browser."
         )
 
-    # CSV Upload
+    # CSV Upload — one-shot import: points are copied into selected_points and
+    # the uploader is reset (fresh key), so later reruns never re-add them.
     with st.expander("📂 Upload points from CSV"):
-        csv_file = st.file_uploader("Upload CSV file", type=['csv'], key="point_csv_uploader", help="CSV must contain 'lat' and 'lon' columns (or 'latitude'/'longitude')")
-        if csv_file:
-            try:
-                import pandas as pd
-                df = pd.read_csv(csv_file)
-                
-                # Detect columns
-                lat_cols = [c for c in df.columns if c.lower() in ['lat', 'latitude', 'y', 'lat_dec']]
-                lon_cols = [c for c in df.columns if c.lower() in ['lon', 'longitude', 'x', 'lon_dec', 'lng']]
-                
-                if not lat_cols or not lon_cols:
-                    st.error("❌ Could not find latitude/longitude columns. Please ensure they are named 'lat' and 'lon'.")
-                else:
-                    lat_col = lat_cols[0]
-                    lon_col = lon_cols[0]
-                    
-                    new_points = []
-                    for _, row in df.iterrows():
-                        p = {'lat': round(float(row[lat_col]), 6), 'lon': round(float(row[lon_col]), 6)}
-                        if p not in st.session_state.selected_points and p not in new_points:
-                            new_points.append(p)
-                    
-                    if new_points:
-                        st.session_state.selected_points.extend(new_points)
-                        # Recenter once to new points (avg center so all are near)
-                        _avg_lat = sum(p['lat'] for p in new_points) / len(new_points)
-                        _avg_lon = sum(p['lon'] for p in new_points) / len(new_points)
-                        _request_point_map_recenter([_avg_lat, _avg_lon])
-                        st.success(f"✅ Added {len(new_points)} points from CSV!")
-                        st.rerun()
-                    else:
-                        st.info("No new unique points found in CSV.")
-            except Exception as e:
-                st.error(f"Error reading CSV: {e}")
+        # Messages from the previous run (st.rerun below would wipe them)
+        for kind, msg in st.session_state.pop("csv_import_msgs", []):
+            getattr(st, kind)(msg)
+
+        gen = st.session_state.get("csv_uploader_gen", 0)
+        csv_files = st.file_uploader(
+            "Upload CSV file(s)",
+            type=['csv'],
+            accept_multiple_files=True,
+            key=f"point_csv_uploader_{gen}",
+            help="CSV must contain 'lat' and 'lon' columns (or 'latitude'/'longitude')"
+        )
+        if csv_files:
+            import pandas as pd
+            msgs = []
+            new_points = []
+            for csv_file in csv_files:
+                try:
+                    df = pd.read_csv(csv_file)
+                except Exception as e:
+                    msgs.append(("error", f"❌ {csv_file.name}: error reading CSV: {e}"))
+                    continue
+
+                parsed = _csv_points(df)
+                if parsed is None:
+                    msgs.append(("error", f"❌ {csv_file.name}: could not find latitude/longitude columns. "
+                                          "Please ensure they are named 'lat' and 'lon'."))
+                    continue
+                points, skipped = parsed
+
+                added = 0
+                for p in points:
+                    if p not in st.session_state.selected_points and p not in new_points:
+                        new_points.append(p)
+                        added += 1
+
+                msg = (f"✅ {csv_file.name}: added {added} point(s)" if added
+                       else f"{csv_file.name}: no new unique points")
+                if skipped:
+                    msg += f" ({skipped} row(s) skipped: missing or invalid coordinates)"
+                msgs.append(("success" if added else "info", msg))
+
+            if new_points:
+                st.session_state.selected_points.extend(new_points)
+                # Recenter once to new points (avg center so all are near)
+                _avg_lat = sum(p['lat'] for p in new_points) / len(new_points)
+                _avg_lon = sum(p['lon'] for p in new_points) / len(new_points)
+                _request_point_map_recenter([_avg_lat, _avg_lon])
+
+            st.session_state.csv_uploader_gen = gen + 1
+            st.session_state.csv_import_msgs = msgs
+            st.rerun()
 
     
     # Interactive map for clicking
@@ -1583,10 +1645,11 @@ def run_extraction(settings_service: SettingsService, export_method: str):
                     selectors=ordered_columns
                 )
                 task.start()
-                
-                # Get task ID
-                task_id = task.status()['id']
-                
+
+                # start() already sets id/name: no extra status() round trip
+                task_id = task.id
+                get_task_watcher().watch(task.name, task_name)
+
                 st.success(f"✅ Task submitted successfully!")
                 st.info(f"**Task ID:** `{task_id}`")
                 st.info(f"**Output:** CSV file in Google Drive folder `{drive_folder}`")
